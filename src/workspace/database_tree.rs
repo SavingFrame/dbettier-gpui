@@ -1,10 +1,23 @@
-use gpui::{Context, Div, Window, div, prelude::*, px};
+use gpui::{Context, Div, Entity, Subscription, Window, div, prelude::*, px};
 
-use crate::theme::AppTheme;
+use crate::{database::profile_store::DatabaseProfileStore, theme::AppTheme};
 
-pub(crate) struct DatabaseTree;
+pub(crate) struct DatabaseTree {
+    profile_store: Entity<DatabaseProfileStore>,
+    _profile_store_subscription: Subscription,
+}
 
 impl DatabaseTree {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        let profile_store = DatabaseProfileStore::global(cx);
+        let profile_store_subscription = cx.observe(&profile_store, |_, _, cx| cx.notify());
+
+        Self {
+            profile_store,
+            _profile_store_subscription: profile_store_subscription,
+        }
+    }
+
     fn render_row(label: &str, depth: f32, selected: bool, theme: &AppTheme) -> Div {
         let row = div()
             .flex()
@@ -31,6 +44,7 @@ impl DatabaseTree {
 
 impl Render for DatabaseTree {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let profile_store = self.profile_store.read(cx);
         let theme = cx.global::<AppTheme>();
 
         div()
@@ -58,23 +72,24 @@ impl Render for DatabaseTree {
                     )
                     .child(div().text_color(theme.text_muted).child("+   ↻   ⋯")),
             )
-            .child(div().flex_1().overflow_hidden().p_2().children([
-                Self::render_row("▾  local development", 0., false, theme),
-                Self::render_row("▾  dbettier", 1., false, theme),
-                Self::render_row("▾  Schemas", 2., false, theme),
-                Self::render_row("▾  public", 3., false, theme),
-                Self::render_row("▾  Tables  8", 4., false, theme),
-                Self::render_row("▦  customers", 5., false, theme),
-                Self::render_row("▦  invoices", 5., false, theme),
-                Self::render_row("▦  invoice_items", 5., false, theme),
-                Self::render_row("▦  products", 5., true, theme),
-                Self::render_row("▦  suppliers", 5., false, theme),
-                Self::render_row("▦  users", 5., false, theme),
-                Self::render_row("▸  Views  3", 4., false, theme),
-                Self::render_row("▸  Functions  12", 4., false, theme),
-                Self::render_row("▸  Sequences  5", 4., false, theme),
-                Self::render_row("▸  Extensions", 3., false, theme),
-            ]))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .p_2()
+                    .when(profile_store.profiles().is_empty(), |tree| {
+                        tree.child(
+                            div()
+                                .p_2()
+                                .text_sm()
+                                .text_color(theme.text_muted)
+                                .child("No database profiles. Use + to add one."),
+                        )
+                    })
+                    .children(profile_store.profiles().iter().map(|profile| {
+                        Self::render_row(&format!("▸  {}", profile.name), 0., false, theme)
+                    })),
+            )
             .child(
                 div()
                     .h(px(38.))

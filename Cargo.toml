@@ -4,9 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dirs = "6"
    gpui = { git = "https://github.com/zed-industries/zed" }
    gpui_platform = {
        git = "https://github.com/zed-industries/zed",
        features = ["wayland", "x11"]
    }
-rand = "0.9"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", features = [ "postgres", "runtime-tokio", "tls-native-tls", "uuid" ] }
+thiserror = "2"
+
+[dependencies.uuid]
+version = "1.23.1"
+# Lets you generate random UUIDs
+features = [
+    "v4",
+    "v7",
+]
