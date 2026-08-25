@@ -142,4 +142,8 @@ impl PostgresDriver {
         let pool = PgPool::connect(&connection_uri).await?;
         Ok(Self { pool })
     }
+
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
 }

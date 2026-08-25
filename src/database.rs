@@ -4,6 +4,7 @@ mod postgres;
 mod profile;
 pub(crate) mod profile_storage;
 pub(crate) mod profile_store;
+pub(crate) mod session_store;
 
 pub use profile::{DatabaseBackend, DatabaseConnectionProfile};
 
@@ -80,6 +81,12 @@ pub struct DatabaseSchema {
 }
 
 impl DatabaseConnection {
+    pub async fn close(&self) {
+        match self {
+            DatabaseConnection::PostgreSql(database) => database.close().await,
+        }
+    }
+
     pub async fn list_schemas(&self) -> Result<Vec<DatabaseSchema>, DatabaseError> {
         match self {
             DatabaseConnection::PostgreSql(database) => database

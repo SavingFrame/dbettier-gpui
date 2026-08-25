@@ -2,7 +2,10 @@ use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
 use crate::{
-    database::{profile_storage::FileDatabaseStorage, profile_store::DatabaseProfileStore},
+    database::{
+        profile_storage::FileDatabaseStorage, profile_store::DatabaseProfileStore,
+        session_store::DatabaseSessionStore,
+    },
     theme::AppTheme,
     workspace::Workspace,
 };
@@ -22,6 +25,9 @@ pub(crate) fn run() {
 
         let profile_store = cx.new(|cx| DatabaseProfileStore::new(database_storage(), cx));
         DatabaseProfileStore::set_global(profile_store, cx);
+
+        let session_store = cx.new(|_| DatabaseSessionStore::new());
+        DatabaseSessionStore::set_global(session_store, cx);
 
         let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
         let window = cx.open_window(
