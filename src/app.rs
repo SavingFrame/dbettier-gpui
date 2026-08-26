@@ -2,6 +2,7 @@ use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
 use crate::{
+    assets::Assets,
     database::{
         profile_storage::FileDatabaseStorage, profile_store::DatabaseProfileStore,
         session_store::DatabaseSessionStore,
@@ -20,7 +21,8 @@ fn database_storage() -> Result<FileDatabaseStorage, String> {
 }
 
 pub(crate) fn run() {
-    application().run(|cx: &mut App| {
+    application().with_assets(Assets).run(|cx: &mut App| {
+        gpui_tokio::init(cx);
         cx.set_global(AppTheme::dark());
 
         let profile_store = cx.new(|cx| DatabaseProfileStore::new(database_storage(), cx));

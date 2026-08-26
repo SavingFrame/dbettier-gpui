@@ -1,7 +1,9 @@
 #![cfg_attr(target_family = "wasm", no_main)]
 
 mod app;
+mod assets;
 mod database;
+mod notifications;
 mod theme;
 mod workspace;
 

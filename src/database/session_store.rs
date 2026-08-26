@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use gpui::{App, AppContext, Context, Entity, Global};
-use uuid::Uuid;
+use gpui::{App, AppContext, Context, Entity, EventEmitter, Global};
 
-use super::{DatabaseConnection, DatabaseConnectionProfile};
+use super::{
+    DatabaseConnectionProfile,
+    session::{DatabaseSession, DatabaseSessionEvent, DatabaseSessionState},
+};
 
 #[derive(Clone)]
 struct GlobalDatabaseSessionStore(Entity<DatabaseSessionStore>);
@@ -11,19 +13,10 @@ struct GlobalDatabaseSessionStore(Entity<DatabaseSessionStore>);
 impl Global for GlobalDatabaseSessionStore {}
 
 pub(crate) struct DatabaseSessionStore {
-    sessions: HashMap<String, DatabaseSession>,
+    sessions: HashMap<String, Entity<DatabaseSession>>,
 }
 
-pub(crate) struct DatabaseSession {
-    connection_attempt_id: Uuid,
-    state: DatabaseSessionState,
-}
-
-pub(crate) enum DatabaseSessionState {
-    Connecting,
-    Connected(DatabaseConnection),
-    Failed(String),
-}
+impl EventEmitter<DatabaseSessionEvent> for DatabaseSessionStore {}
 
 impl DatabaseSessionStore {
     pub(crate) fn new() -> Self {
@@ -40,56 +33,47 @@ impl DatabaseSessionStore {
         cx.global::<GlobalDatabaseSessionStore>().0.clone()
     }
 
-    pub(crate) fn session(&self, profile_id: &str) -> Option<&DatabaseSession> {
+    pub(crate) fn session(&self, profile_id: &str) -> Option<&Entity<DatabaseSession>> {
         self.sessions.get(profile_id)
     }
 
     pub(crate) fn connect(&mut self, profile: DatabaseConnectionProfile, cx: &mut Context<Self>) {
         if self.sessions.get(&profile.uuid).is_some_and(|session| {
             matches!(
-                session.state,
-                DatabaseSessionState::Connecting | DatabaseSessionState::Connected(_)
+                session.read(cx).state(),
+                DatabaseSessionState::Connecting | DatabaseSessionState::Connected { .. }
             )
         }) {
             return;
         }
 
         let profile_id = profile.uuid.clone();
-        let connection_attempt_id = Uuid::new_v4();
+        let session = cx.new(|cx| DatabaseSession::new(profile, cx));
 
-        self.sessions.insert(
-            profile_id.clone(),
-            DatabaseSession {
-                connection_attempt_id,
-                state: DatabaseSessionState::Connecting,
+        cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(
+            &session,
+            |_: &mut DatabaseSessionStore, _, event: &DatabaseSessionEvent, cx| {
+                cx.emit(event.clone());
             },
-        );
-        cx.notify();
-
-        cx.spawn(async move |session_store, cx| {
-            let result = cx
-                .background_spawn(DatabaseConnection::from_connection_profile(profile))
-                .await;
-
-            if let Err(error) = session_store.update(cx, |session_store, cx| {
-                let Some(session) = session_store.sessions.get_mut(&profile_id) else {
-                    return;
-                };
-
-                if session.connection_attempt_id != connection_attempt_id {
-                    return;
-                }
-
-                session.state = match result {
-                    Ok(connection) => DatabaseSessionState::Connected(connection),
-                    Err(error) => DatabaseSessionState::Failed(error.to_string()),
-                };
-                cx.notify();
-            }) {
-                eprintln!("failed to update the global database session store: {error}");
-            }
-        })
+        )
         .detach();
+
+        self.sessions.insert(profile_id, session);
+        cx.notify();
+    }
+
+    pub(crate) fn load_tables(
+        &mut self,
+        profile_id: &str,
+        schema_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.sessions.get(profile_id) else {
+            return;
+        };
+
+        session.update(cx, |session, cx| session.load_tables(schema_name, cx));
     }
 
     pub(crate) fn disconnect(&mut self, profile_id: &str, cx: &mut Context<Self>) {
@@ -97,17 +81,7 @@ impl DatabaseSessionStore {
             return;
         };
 
+        session.update(cx, |session, cx| session.disconnect(cx));
         cx.notify();
-
-        if let DatabaseSessionState::Connected(connection) = session.state {
-            cx.background_spawn(async move { connection.close().await })
-                .detach();
-        }
-    }
-}
-
-impl DatabaseSession {
-    pub(crate) fn state(&self) -> &DatabaseSessionState {
-        &self.state
     }
 }

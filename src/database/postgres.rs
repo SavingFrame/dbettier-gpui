@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use sqlx::{Connection, PgPool, Row, postgres::PgConnection};
 
 use crate::database::{
-    ConstraintType, DatabaseSchema, DatabaseTable, TableColumn, TableConstraint,
+    ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
 };
 
 #[derive(Clone)]
@@ -26,7 +26,10 @@ impl PostgresDriver {
             .await
             .map(|rows| {
                 rows.into_iter()
-                    .map(|row| DatabaseSchema { name: row.get(0) })
+                    .map(|row| DatabaseSchema {
+                        name: row.get(0),
+                        tables: LoadState::NotLoaded,
+                    })
                     .collect()
             })
     }

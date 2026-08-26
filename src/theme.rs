@@ -13,6 +13,8 @@ pub(crate) struct AppTheme {
     pub(crate) text_subtle: Rgba,
     pub(crate) selection: Rgba,
     pub(crate) success: Rgba,
+    pub(crate) warning: Rgba,
+    pub(crate) error: Rgba,
     pub(crate) editor_text: Rgba,
     pub(crate) line_number: Rgba,
 }
@@ -31,6 +33,8 @@ impl AppTheme {
             text_subtle: rgb(0xb4bac3),
             selection: rgb(0x28364d),
             success: rgb(0x75be88),
+            warning: rgb(0xd7ba7d),
+            error: rgb(0xe06c75),
             editor_text: rgb(0xc6ccd5),
             line_number: rgb(0x5f6670),
         }

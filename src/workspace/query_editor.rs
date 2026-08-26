@@ -16,13 +16,10 @@ impl Render for QueryEditor {
         ];
 
         div()
-            .h(px(260.))
-            .flex_none()
+            .size_full()
             .flex()
             .flex_col()
             .bg(theme.panel)
-            .border_t_1()
-            .border_color(theme.border)
             .child(
                 div()
                     .h(px(40.))
