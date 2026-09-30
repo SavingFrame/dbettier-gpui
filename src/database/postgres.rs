@@ -4,6 +4,7 @@ use sqlx::{Connection, PgPool, Row, postgres::PgConnection};
 
 use crate::database::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
+    TableIndex,
 };
 
 #[derive(Clone)]
@@ -53,12 +54,16 @@ impl PostgresDriver {
                             name: row.get(0),
                             columns: Vec::new(),
                             constraints: Vec::new(),
+                            indexes: Vec::new(),
                         })
                         .collect()
                 })?;
 
-        let tables = self.load_columns_for_tables(schema_name, tables).await;
-        self.load_constraints_for_tables(schema_name, tables?).await
+        let tables = self.load_columns_for_tables(schema_name, tables).await?;
+        let tables = self
+            .load_constraints_for_tables(schema_name, tables)
+            .await?;
+        self.load_indexes_for_tables(schema_name, tables).await
     }
 
     async fn load_columns_for_tables(
@@ -137,6 +142,51 @@ impl PostgresDriver {
         }
         for table in &mut tables {
             table.constraints = constraints_by_table.remove(&table.name).unwrap_or_default();
+        }
+        Ok(tables)
+    }
+
+    async fn load_indexes_for_tables(
+        &self,
+        schema_name: &str,
+        mut tables: Vec<DatabaseTable>,
+    ) -> Result<Vec<DatabaseTable>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT table_class.relname AS table_name,
+                    index_class.relname AS index_name,
+                    index_metadata.indisunique AS is_unique,
+                    index_metadata.indisprimary AS is_primary,
+                    pg_get_indexdef(index_metadata.indexrelid) AS definition
+             FROM pg_catalog.pg_index AS index_metadata
+             JOIN pg_catalog.pg_class AS table_class
+               ON table_class.oid = index_metadata.indrelid
+             JOIN pg_catalog.pg_class AS index_class
+               ON index_class.oid = index_metadata.indexrelid
+             JOIN pg_catalog.pg_namespace AS namespace
+               ON namespace.oid = table_class.relnamespace
+             WHERE namespace.nspname = $1
+             ORDER BY table_class.relname, index_class.relname",
+        )
+        .bind(schema_name)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut indexes_by_table: HashMap<String, Vec<TableIndex>> = HashMap::new();
+
+        for row in rows {
+            let table_name: String = row.get("table_name");
+            indexes_by_table
+                .entry(table_name)
+                .or_default()
+                .push(TableIndex {
+                    name: row.get("index_name"),
+                    definition: row.get("definition"),
+                    is_unique: row.get("is_unique"),
+                    is_primary: row.get("is_primary"),
+                });
+        }
+
+        for table in &mut tables {
+            table.indexes = indexes_by_table.remove(&table.name).unwrap_or_default();
         }
         Ok(tables)
     }

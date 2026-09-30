@@ -9,5 +9,6 @@ pub(crate) mod session_store;
 
 pub use catalog::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
+    TableIndex,
 };
 pub use profile::DatabaseConnectionProfile;

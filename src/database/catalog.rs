@@ -38,10 +38,19 @@ pub struct TableConstraint {
 }
 
 #[derive(Clone)]
+pub struct TableIndex {
+    pub name: String,
+    pub definition: String,
+    pub is_unique: bool,
+    pub is_primary: bool,
+}
+
+#[derive(Clone)]
 pub struct DatabaseTable {
     pub name: String,
     pub columns: Vec<TableColumn>,
     pub constraints: Vec<TableConstraint>,
+    pub indexes: Vec<TableIndex>,
 }
 
 #[derive(Clone)]
