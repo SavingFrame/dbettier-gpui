@@ -1,22 +1,28 @@
 mod database_tree;
 mod query_editor;
 mod status_bar;
+mod tab_bar;
 mod table_view;
 
-use gpui::{Context, Entity, Pixels, Subscription, Window, div, prelude::*, px};
+use gpui::{Context, Entity, Pixels, Subscription, Window, base::StyledExt, div, prelude::*, px};
 use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
     notification::Notification,
     resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
 };
 
+use gpui_kit::component::tab::{Tab, TabBar};
+
 use self::{
     database_tree::DatabaseTree, query_editor::QueryEditor, status_bar::StatusBar,
     table_view::TableView,
 };
-use crate::database::{
-    profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
-    session_store::DatabaseSessionStore,
+use crate::{
+    database::{
+        profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
+        session_store::DatabaseSessionStore,
+    },
+    workspace::tab_bar::WorkspaceTab,
 };
 
 struct ConnectionErrorNotification;
@@ -25,10 +31,6 @@ const DEFAULT_DATABASE_TREE_WIDTH: Pixels = px(280.);
 const MIN_DATABASE_TREE_WIDTH: Pixels = px(180.);
 const MAX_DATABASE_TREE_WIDTH: Pixels = px(520.);
 const MIN_MAIN_CONTENT_WIDTH: Pixels = px(320.);
-const DEFAULT_QUERY_EDITOR_HEIGHT: Pixels = px(260.);
-const MIN_QUERY_EDITOR_HEIGHT: Pixels = px(140.);
-const MAX_QUERY_EDITOR_HEIGHT: Pixels = px(600.);
-const MIN_TABLE_VIEW_HEIGHT: Pixels = px(120.);
 
 pub(crate) struct Workspace {
     profile_store: Entity<DatabaseProfileStore>,
@@ -40,6 +42,9 @@ pub(crate) struct Workspace {
     status_bar: Entity<StatusBar>,
     horizontal_layout: Entity<ResizableState>,
     vertical_layout: Entity<ResizableState>,
+    active_tab: usize,
+
+    tabs: Vec<Entity<WorkspaceTab>>,
 }
 
 impl Workspace {
@@ -78,12 +83,14 @@ impl Workspace {
             status_bar: cx.new(|_| StatusBar),
             horizontal_layout: cx.new(|_| ResizableState::default()),
             vertical_layout: cx.new(|_| ResizableState::default()),
+            active_tab: 0,
+            tabs: Vec::new(),
         }
     }
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let database_profile_load_error =
             self.profile_store.read(cx).load_error().map(str::to_owned);
         let theme = cx.theme();
@@ -125,27 +132,34 @@ impl Render for Workspace {
                         .child(
                             resizable_panel()
                                 .size_range(MIN_MAIN_CONTENT_WIDTH..Pixels::MAX)
+                                .flex_col()
                                 .overflow_hidden()
+                                .v_flex()
                                 .child(
-                                    v_resizable("workspace-vertical")
-                                        .with_state(&self.vertical_layout)
-                                        .child(
-                                            resizable_panel()
-                                                .size_range(MIN_TABLE_VIEW_HEIGHT..Pixels::MAX)
-                                                .overflow_hidden()
-                                                .child(self.table_view.clone()),
-                                        )
-                                        .child(
-                                            resizable_panel()
-                                                .size(DEFAULT_QUERY_EDITOR_HEIGHT)
-                                                .size_range(
-                                                    MIN_QUERY_EDITOR_HEIGHT
-                                                        ..MAX_QUERY_EDITOR_HEIGHT,
-                                                )
-                                                .flex_none()
-                                                .overflow_hidden()
-                                                .child(self.query_editor.clone()),
-                                        ),
+                                    TabBar::new("tabs")
+                                        .w_full()
+                                        .flex_none()
+                                        .selected_index(self.active_tab)
+                                        .on_click(cx.listener(|view, index, _, cx| {
+                                            view.active_tab = *index;
+                                            cx.notify();
+                                        }))
+                                        .children(self.tabs.iter().map(|tab| {
+                                            Tab::new().label(tab.read(cx).title.clone())
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .when(self.tabs.is_empty(), |content| {
+                                            content
+                                                .p_2()
+                                                .text_sm()
+                                                .text_color(theme.muted_foreground)
+                                                .child("Nothing here")
+                                        })
+                                        .when(!self.tabs.is_empty(), |content| {
+                                            content.child(self.tabs[self.active_tab].clone())
+                                        }),
                                 ),
                         ),
                 ),
