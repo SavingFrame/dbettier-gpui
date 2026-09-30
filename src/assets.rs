@@ -2,7 +2,17 @@ use std::borrow::Cow;
 
 use gpui::{AssetSource, Result, SharedString};
 
-pub(crate) struct Assets;
+pub(crate) struct Assets {
+    kit: gpui_kit::assets::Assets,
+}
+
+impl Assets {
+    pub(crate) fn new() -> Self {
+        Self {
+            kit: gpui_kit::assets::Assets::new(""),
+        }
+    }
+}
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
@@ -16,21 +26,42 @@ impl AssetSource for Assets {
             _ => None,
         };
 
-        Ok(bytes.map(Cow::Borrowed))
+        match bytes {
+            Some(bytes) => Ok(Some(Cow::Borrowed(bytes))),
+            None => self.kit.load(path),
+        }
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        if path == "icons" {
-            Ok(vec![
-                "column.svg".into(),
-                "database.svg".into(),
-                "index.svg".into(),
-                "key.svg".into(),
-                "schema.svg".into(),
-                "table.svg".into(),
-            ])
-        } else {
-            Ok(Vec::new())
+        let mut paths = self.kit.list(path)?;
+        for icon in ["column", "database", "index", "key", "schema", "table"] {
+            let filename = format!("icons/{icon}.svg");
+            if filename.starts_with(path) {
+                paths.push(filename.into());
+            }
         }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serves_application_and_kit_icons() {
+        let assets = Assets::new();
+        assert!(
+            assets
+                .load("icons/database.svg")
+                .is_ok_and(|bytes| bytes.is_some())
+        );
+        assert!(
+            assets
+                .load("icons/inbox.svg")
+                .is_ok_and(|bytes| bytes.is_some())
+        );
     }
 }

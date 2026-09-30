@@ -1,5 +1,5 @@
+use crate::runtime;
 use gpui::{Context, EventEmitter};
-use gpui_tokio::Tokio;
 
 use super::{
     catalog::{DatabaseSchema, LoadState},
@@ -37,7 +37,7 @@ impl DatabaseSession {
         let profile_name = profile.name.clone();
 
         cx.spawn(async move |session, cx| {
-            let result = Tokio::spawn(cx, async move {
+            let result = runtime::spawn(cx, async move {
                 match DatabaseConnection::from_connection_profile(profile).await {
                     Ok(connection) => {
                         let schemas = connection.list_schemas().await;
@@ -109,7 +109,7 @@ impl DatabaseSession {
         cx.notify();
 
         cx.spawn(async move |session, cx| {
-            let result = Tokio::spawn(cx, async move {
+            let result = runtime::spawn(cx, async move {
                 connection.list_tables(&schema_name_for_query).await
             })
             .await;
@@ -148,6 +148,6 @@ impl DatabaseSession {
         };
 
         let connection = connection.clone();
-        Tokio::spawn(cx, async move { connection.close().await }).detach();
+        runtime::spawn(cx, async move { connection.close().await }).detach();
     }
 }

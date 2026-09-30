@@ -1,12 +1,18 @@
 use gpui::{Context, Window, div, prelude::*, px};
 
-use crate::theme::AppTheme;
+use gpui_kit::{
+    assets::IconName,
+    component::{
+        ActiveTheme as _, Sizable as _,
+        button::{Button, ButtonVariants as _},
+    },
+};
 
 pub(crate) struct QueryEditor;
 
 impl Render for QueryEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.global::<AppTheme>();
+        let theme = cx.theme();
         let code_lines = [
             ("1", "SELECT id, name, category, price, updated_at"),
             ("2", "FROM public.products"),
@@ -19,7 +25,7 @@ impl Render for QueryEditor {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.panel)
+            .bg(theme.background)
             .child(
                 div()
                     .h(px(40.))
@@ -35,7 +41,6 @@ impl Render for QueryEditor {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(div().text_color(theme.success).child("▶"))
                             .child(
                                 div()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -44,15 +49,17 @@ impl Render for QueryEditor {
                             .child(
                                 div()
                                     .text_sm()
-                                    .text_color(theme.text_muted)
+                                    .text_color(theme.muted_foreground)
                                     .child("dbettier / public"),
                             ),
                     )
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.text_muted)
-                            .child("Run  Ctrl+Enter"),
+                        Button::new("run-query")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Play)
+                            .label("Run")
+                            .tooltip("Run query (execution not implemented yet)"),
                     ),
             )
             .child(
@@ -69,10 +76,10 @@ impl Render for QueryEditor {
                                 div()
                                     .w(px(36.))
                                     .flex_none()
-                                    .text_color(theme.line_number)
+                                    .text_color(theme.muted_foreground)
                                     .child(number),
                             )
-                            .child(div().text_color(theme.editor_text).child(code))
+                            .child(div().text_color(theme.foreground).child(code))
                     })),
             )
     }
