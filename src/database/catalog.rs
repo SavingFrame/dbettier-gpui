@@ -61,6 +61,15 @@ pub enum LoadState<T> {
     Failed(String),
 }
 
+impl<T> LoadState<T> {
+    pub(crate) fn from_result(result: Result<T, impl std::fmt::Display>) -> Self {
+        match result {
+            Ok(value) => Self::Loaded(value),
+            Err(error) => Self::Failed(error.to_string()),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DatabaseSchema {
     pub name: String,

@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{fmt::Display, future::Future};
 
 use gpui::{App, AppContext, Global, Task};
 use tokio::{runtime::Runtime, task::JoinError};
@@ -28,6 +28,25 @@ pub(crate) fn init(cx: &mut App) -> Result<(), std::io::Error> {
         runtime: Some(runtime),
     });
     Ok(())
+}
+
+pub(crate) fn spawn_result<C, Fut, Output, Error>(
+    cx: &C,
+    operation: &'static str,
+    future: Fut,
+) -> Task<Result<Output, String>>
+where
+    C: AppContext,
+    Fut: Future<Output = Result<Output, Error>> + Send + 'static,
+    Output: Send + 'static,
+    Error: Display + Send + 'static,
+{
+    let task = spawn(cx, future);
+    cx.background_spawn(async move {
+        task.await
+            .map_err(|error| format!("{operation} task failed: {error}"))?
+            .map_err(|error| error.to_string())
+    })
 }
 
 struct AbortOnDrop(tokio::task::AbortHandle);

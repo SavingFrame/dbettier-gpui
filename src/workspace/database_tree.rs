@@ -1,9 +1,14 @@
+mod labels;
+
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
 
-use gpui::{Context, Entity, Hsla, SharedString, Subscription, Window, div, prelude::*, px, svg};
+use gpui::{
+    Context, Entity, Hsla, MouseButton, SharedString, Subscription, Window, div, prelude::*, px,
+    svg,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Theme,
@@ -13,9 +18,9 @@ use gpui_kit::component::{
 };
 
 use crate::database::{
-    ConstraintType, DatabaseConnectionProfile, DatabaseSchema, DatabaseTable, LoadState,
-    TableColumn, TableConstraint, TableIndex, profile_store::DatabaseProfileStore,
-    session::DatabaseSessionState, session_store::DatabaseSessionStore,
+    DatabaseConnectionProfile, DatabaseSchema, DatabaseTable, LoadState,
+    profile_store::DatabaseProfileStore, session::DatabaseSessionState,
+    session_store::DatabaseSessionStore,
 };
 
 #[derive(Clone, Copy)]
@@ -55,8 +60,42 @@ impl TableSection {
 enum RowAction {
     Profile(DatabaseConnectionProfile),
     Schema { profile_id: String, name: String },
-    Table(String),
-    Section(String),
+    Table(TableTarget),
+    Section,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RowInteraction {
+    Select,
+    Toggle,
+    OpenTable,
+}
+
+impl RowAction {
+    fn interaction(&self, arrow: bool, click_count: usize) -> RowInteraction {
+        if arrow {
+            if click_count == 1 {
+                RowInteraction::Toggle
+            } else {
+                RowInteraction::Select
+            }
+        } else if click_count == 2 {
+            if matches!(self, Self::Table(_)) {
+                RowInteraction::OpenTable
+            } else {
+                RowInteraction::Toggle
+            }
+        } else {
+            RowInteraction::Select
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TableTarget {
+    profile_id: String,
+    schema_name: String,
+    table_name: String,
 }
 
 #[derive(Clone, Copy)]
@@ -114,10 +153,8 @@ pub(crate) struct DatabaseTree {
     session_store: Entity<DatabaseSessionStore>,
     tree_state: Entity<TreeState>,
     rows: Rc<HashMap<SharedString, RowInfo>>,
-    expanded_profiles: HashSet<String>,
-    expanded_schemas: HashSet<String>,
-    expanded_tables: HashSet<String>,
-    expanded_sections: HashSet<String>,
+    expanded_items: HashSet<String>,
+    rebuild_scheduled: bool,
     _profile_store_subscription: Subscription,
     _session_store_subscription: Subscription,
     _tree_subscription: Subscription,
@@ -129,10 +166,10 @@ impl DatabaseTree {
         let session_store = DatabaseSessionStore::global(cx);
         let tree_state = cx.new(|cx| TreeState::new(cx));
         let profile_store_subscription = cx.observe(&profile_store, |tree, _, cx| {
-            tree.schedule_rebuild(None, cx);
+            tree.schedule_rebuild(cx);
         });
         let session_store_subscription = cx.observe(&session_store, |tree, _, cx| {
-            tree.schedule_rebuild(None, cx);
+            tree.schedule_rebuild(cx);
         });
         let tree_subscription = cx.subscribe(&tree_state, |tree, _, event: &TreeEvent, cx| {
             tree.on_tree_event(event, cx);
@@ -143,22 +180,27 @@ impl DatabaseTree {
             session_store,
             tree_state,
             rows: Rc::new(HashMap::new()),
-            expanded_profiles: HashSet::new(),
-            expanded_schemas: HashSet::new(),
-            expanded_tables: HashSet::new(),
-            expanded_sections: HashSet::new(),
+            expanded_items: HashSet::new(),
+            rebuild_scheduled: false,
             _profile_store_subscription: profile_store_subscription,
             _session_store_subscription: session_store_subscription,
             _tree_subscription: tree_subscription,
         };
-        tree.rebuild(None, cx);
+        tree.rebuild(cx);
         tree
     }
 
-    fn schedule_rebuild(&self, selected: Option<SharedString>, cx: &mut Context<Self>) {
+    fn schedule_rebuild(&mut self, cx: &mut Context<Self>) {
+        if self.rebuild_scheduled {
+            return;
+        }
+        self.rebuild_scheduled = true;
         let entity = cx.entity();
         cx.defer(move |cx| {
-            entity.update(cx, |tree, cx| tree.rebuild(selected, cx));
+            entity.update(cx, |tree, cx| {
+                tree.rebuild_scheduled = false;
+                tree.rebuild(cx);
+            });
         });
     }
 
@@ -171,52 +213,82 @@ impl DatabaseTree {
             return;
         };
 
+        if expanded {
+            self.expanded_items.insert(id.to_string());
+        } else {
+            self.expanded_items.remove(id.as_ref());
+            return;
+        }
+
         match action {
             RowAction::Profile(profile) => {
-                Self::set_expanded(&mut self.expanded_profiles, profile.uuid.clone(), expanded);
-                if expanded {
-                    self.session_store
-                        .update(cx, |store, cx| store.connect(profile, cx));
-                }
+                self.session_store
+                    .update(cx, |store, cx| store.connect(profile, cx));
             }
             RowAction::Schema { profile_id, name } => {
-                Self::set_expanded(
-                    &mut self.expanded_schemas,
-                    Self::schema_key(&profile_id, &name),
-                    expanded,
-                );
-                if expanded {
-                    self.session_store.update(cx, |store, cx| {
-                        store.load_tables(&profile_id, &name, cx);
-                    });
+                let session = self.session_store.read(cx).session(&profile_id).cloned();
+                if let Some(session) = session {
+                    session.update(cx, |session, cx| session.load_tables(&name, cx));
                 }
             }
-            RowAction::Table(key) => {
-                Self::set_expanded(&mut self.expanded_tables, key.clone(), expanded);
-                if expanded {
-                    for section in [
-                        TableSection::Columns,
-                        TableSection::Constraints,
-                        TableSection::Indexes,
-                    ] {
-                        self.expanded_sections
-                            .insert(Self::section_key(&key, section));
-                    }
+            RowAction::Table(target) => {
+                let key =
+                    Self::table_key(&target.profile_id, &target.schema_name, &target.table_name);
+                for section in [
+                    TableSection::Columns,
+                    TableSection::Constraints,
+                    TableSection::Indexes,
+                ] {
+                    self.expanded_items
+                        .insert(format!("section:{}", Self::section_key(&key, section)));
                 }
+                self.schedule_rebuild(cx);
             }
-            RowAction::Section(key) => {
-                Self::set_expanded(&mut self.expanded_sections, key, expanded);
-            }
+            RowAction::Section => {}
         }
-        self.schedule_rebuild(Some(id.clone()), cx);
     }
 
-    fn set_expanded(expanded_items: &mut HashSet<String>, key: String, expanded: bool) {
-        if expanded {
-            expanded_items.insert(key);
-        } else {
-            expanded_items.remove(&key);
+    fn select_row(&mut self, id: &SharedString, window: &mut Window, cx: &mut Context<Self>) {
+        self.tree_state.update(cx, |state, cx| {
+            state.set_selected_index(state.index_of(id), cx);
+            state.focus(window, cx);
+        });
+    }
+
+    fn activate_row(
+        &mut self,
+        id: &SharedString,
+        arrow: bool,
+        click_count: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(action) = self.rows.get(id).and_then(|row| row.action.clone()) else {
+            return;
+        };
+        match action.interaction(arrow, click_count) {
+            RowInteraction::Select => return,
+            RowInteraction::OpenTable => {
+                if let RowAction::Table(target) = action {
+                    self.on_open_table(&target);
+                }
+                return;
+            }
+            RowInteraction::Toggle => {}
         }
+        let event = if self.expanded_items.contains(id.as_ref()) {
+            TreeEvent::Collapsed(id.clone())
+        } else {
+            TreeEvent::Expanded(id.clone())
+        };
+        self.on_tree_event(&event, cx);
+        self.rebuild(cx);
+    }
+
+    fn on_open_table(&mut self, target: &TableTarget) {
+        eprintln!(
+            "Open table: profile={}, schema={}, table={}",
+            target.profile_id, target.schema_name, target.table_name,
+        );
     }
 
     fn schema_key(profile_id: &str, schema_name: &str) -> String {
@@ -261,7 +333,7 @@ impl DatabaseTree {
         TreeItem::new(id, label).disabled(true)
     }
 
-    fn rebuild(&mut self, selected: Option<SharedString>, cx: &mut Context<Self>) {
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
         let profiles = self.profile_store.read(cx).profiles().to_vec();
         let mut rows = HashMap::new();
         let items: Vec<TreeItem> = profiles
@@ -270,7 +342,7 @@ impl DatabaseTree {
             .collect();
         self.rows = Rc::new(rows);
         self.tree_state.update(cx, |state, cx| {
-            let selected = selected.or_else(|| state.selected_item().map(|item| item.id.clone()));
+            let selected = state.selected_item().map(|item| item.id.clone());
             state.set_items(items, cx);
             if let Some(id) = selected {
                 state.set_selected_index(state.index_of(&id), cx);
@@ -288,7 +360,7 @@ impl DatabaseTree {
         let id = format!("profile:{}", profile.uuid);
         let session = self.session_store.read(cx).session(&profile.uuid).cloned();
         let (status, children) = match session.as_ref().map(|session| session.read(cx).state()) {
-            None => (
+            None | Some(DatabaseSessionState::Disconnected) => (
                 ConnectionStatus::Disconnected,
                 vec![Self::message(&id, "Starting connection...", rows, false)],
             ),
@@ -327,7 +399,8 @@ impl DatabaseTree {
                 Some(status),
             ),
             children,
-            self.expanded_profiles.contains(&profile.uuid),
+            self.expanded_items
+                .contains(&format!("profile:{}", profile.uuid)),
         )
     }
 
@@ -365,7 +438,7 @@ impl DatabaseTree {
                 None,
             ),
             children,
-            self.expanded_schemas.contains(&key),
+            self.expanded_items.contains(&format!("schema:{key}")),
         )
     }
 
@@ -382,21 +455,21 @@ impl DatabaseTree {
                 &key,
                 TableSection::Columns,
                 &table.columns,
-                Self::column_label,
+                labels::column_label,
                 rows,
             ),
             self.section_item(
                 &key,
                 TableSection::Constraints,
                 &table.constraints,
-                Self::constraint_label,
+                labels::constraint_label,
                 rows,
             ),
             self.section_item(
                 &key,
                 TableSection::Indexes,
                 &table.indexes,
-                Self::index_label,
+                labels::index_label,
                 rows,
             ),
         ];
@@ -404,9 +477,17 @@ impl DatabaseTree {
             rows,
             format!("table:{key}"),
             table.name.clone(),
-            RowInfo::folder(RowAction::Table(key.clone()), Some("icons/table.svg"), None),
+            RowInfo::folder(
+                RowAction::Table(TableTarget {
+                    profile_id: profile_id.to_owned(),
+                    schema_name: schema_name.to_owned(),
+                    table_name: table.name.clone(),
+                }),
+                Some("icons/table.svg"),
+                None,
+            ),
             sections,
-            self.expanded_tables.contains(&key),
+            self.expanded_items.contains(&format!("table:{key}")),
         )
     }
 
@@ -447,70 +528,10 @@ impl DatabaseTree {
             rows,
             id,
             format!("{} ({})", section.title(), items.len()),
-            RowInfo::folder(RowAction::Section(key.clone()), None, None),
+            RowInfo::folder(RowAction::Section, None, None),
             children,
-            self.expanded_sections.contains(&key),
+            self.expanded_items.contains(&format!("section:{key}")),
         )
-    }
-
-    fn column_label(column: &TableColumn) -> String {
-        let mut data_type = column.data_type.clone();
-        if let Some(maximum_length) = column.character_maximum_length {
-            data_type.push_str(&format!("({maximum_length})"));
-        }
-        let mut attributes = Vec::new();
-        if !column.is_nullable {
-            attributes.push("not null".to_string());
-        }
-        if column.is_auto_increment {
-            attributes.push("auto increment".to_string());
-        }
-        if let Some(default) = &column.default {
-            attributes.push(format!("default {default}"));
-        }
-        let suffix = if attributes.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", attributes.join(", "))
-        };
-        format!("{}: {data_type}{suffix}", column.name)
-    }
-
-    fn constraint_label(constraint: &TableConstraint) -> String {
-        let constraint_type = match &constraint.constraint_type {
-            ConstraintType::ForeignKey => "foreign key",
-            ConstraintType::Unique => "unique",
-            ConstraintType::PrimaryKey => "primary key",
-            ConstraintType::Check => "check",
-            ConstraintType::Other(value) => value,
-        };
-        let mut attributes = vec![constraint_type.to_string()];
-        if constraint.is_deferrable {
-            attributes.push("deferrable".to_string());
-        }
-        if constraint.nulls_distinct == Some(false) {
-            attributes.push("nulls not distinct".to_string());
-        }
-        format!("{} ({})", constraint.name, attributes.join(", "))
-    }
-
-    fn index_label(index: &TableIndex) -> String {
-        let mut attributes = Vec::new();
-        if index.is_primary {
-            attributes.push("primary");
-        } else if index.is_unique {
-            attributes.push("unique");
-        }
-        if attributes.is_empty() {
-            format!("{}: {}", index.name, index.definition)
-        } else {
-            format!(
-                "{} ({}): {}",
-                index.name,
-                attributes.join(", "),
-                index.definition
-            )
-        }
     }
 }
 
@@ -518,6 +539,7 @@ impl Render for DatabaseTree {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let rows = self.rows.clone();
+        let view = cx.entity().downgrade();
         let empty = self.profile_store.read(cx).profiles().is_empty();
 
         div()
@@ -583,79 +605,133 @@ impl Render for DatabaseTree {
                         )
                     })
                     .when(!empty, |content| {
-                        content.child(tree(
-                            &self.tree_state,
-                            move |index, entry, selected, _, cx| {
-                                let theme = cx.theme();
-                                let row = rows.get(&entry.item().id);
-                                let icon = row.and_then(|row| row.icon);
-                                let status = row
-                                    .and_then(|row| row.status)
-                                    .map(|status| status.color(theme));
-                                let color = if row.is_some_and(|row| row.error) {
-                                    theme.danger
-                                } else {
-                                    theme.sidebar_foreground
-                                };
-                                ListItem::new(index)
-                                    .selected(selected)
-                                    .h_7()
-                                    .pl(px(12. + entry.depth() as f32 * 16.))
-                                    .text_sm()
-                                    .text_color(color)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .w_full()
-                                            .min_w_0()
-                                            .child(
-                                                div()
-                                                    .w_4()
+                        content.child(tree(&self.tree_state, move |_, entry, selected, _, cx| {
+                            let theme = cx.theme();
+                            let row = rows.get(&entry.item().id);
+                            let icon = row.and_then(|row| row.icon);
+                            let status = row
+                                .and_then(|row| row.status)
+                                .map(|status| status.color(theme));
+                            let color = if row.is_some_and(|row| row.error) {
+                                theme.danger
+                            } else {
+                                theme.sidebar_foreground
+                            };
+                            let id = entry.item().id.clone();
+                            let select_id = id.clone();
+                            let select_view = view.clone();
+                            let activate_view = view.clone();
+                            let arrow_id = id.clone();
+                            let arrow_select_id = id.clone();
+                            let arrow_view = view.clone();
+                            let arrow_select_view = view.clone();
+                            ListItem::new(id.clone())
+                                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                                    // The library tree toggles on mouse-down unless we intercept it.
+                                    cx.stop_propagation();
+                                    if let Some(view) = select_view.upgrade() {
+                                        view.update(cx, |view, cx| {
+                                            view.select_row(&select_id, window, cx)
+                                        });
+                                    }
+                                })
+                                .on_click(move |event, _, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(view) = activate_view.upgrade() {
+                                        view.update(cx, |view, cx| {
+                                            view.activate_row(&id, false, event.click_count(), cx)
+                                        });
+                                    }
+                                })
+                                .selected(selected)
+                                .h_7()
+                                .pl(px(12. + entry.depth() as f32 * 16.))
+                                .text_sm()
+                                .text_color(color)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .w_full()
+                                        .min_w_0()
+                                        .child(
+                                            div()
+                                                .id("disclosure")
+                                                .w_4()
+                                                .flex_none()
+                                                .when(entry.is_folder(), |arrow| {
+                                                    arrow
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            move |_, window, cx| {
+                                                                cx.stop_propagation();
+                                                                if let Some(view) =
+                                                                    arrow_select_view.upgrade()
+                                                                {
+                                                                    view.update(cx, |view, cx| {
+                                                                        view.select_row(
+                                                                            &arrow_select_id,
+                                                                            window,
+                                                                            cx,
+                                                                        )
+                                                                    });
+                                                                }
+                                                            },
+                                                        )
+                                                        .on_click(move |event, _, cx| {
+                                                            cx.stop_propagation();
+                                                            if let Some(view) = arrow_view.upgrade()
+                                                            {
+                                                                view.update(cx, |view, cx| {
+                                                                    view.activate_row(
+                                                                        &arrow_id,
+                                                                        true,
+                                                                        event.click_count(),
+                                                                        cx,
+                                                                    )
+                                                                });
+                                                            }
+                                                        })
+                                                })
+                                                .text_color(theme.muted_foreground)
+                                                .child(if entry.is_folder() {
+                                                    if entry.is_expanded() { "▾" } else { "▸" }
+                                                } else {
+                                                    ""
+                                                }),
+                                        )
+                                        .when_some(icon, |row, icon| {
+                                            row.child(
+                                                svg()
+                                                    .path(icon)
+                                                    .size_4()
                                                     .flex_none()
-                                                    .text_color(theme.muted_foreground)
-                                                    .child(if entry.is_folder() {
-                                                        if entry.is_expanded() {
-                                                            "▾"
-                                                        } else {
-                                                            "▸"
-                                                        }
-                                                    } else {
-                                                        ""
-                                                    }),
+                                                    .mr_2()
+                                                    .text_color(theme.muted_foreground),
                                             )
-                                            .when_some(icon, |row, icon| {
-                                                row.child(
-                                                    svg()
-                                                        .path(icon)
-                                                        .size_4()
-                                                        .flex_none()
-                                                        .mr_2()
-                                                        .text_color(theme.muted_foreground),
-                                                )
-                                            })
-                                            .child(
+                                        })
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .text_ellipsis()
+                                                .child(entry.item().label.clone()),
+                                        )
+                                        .when_some(status, |row, status| {
+                                            row.child(
                                                 div()
-                                                    .min_w_0()
-                                                    .flex_1()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .text_ellipsis()
-                                                    .child(entry.item().label.clone()),
+                                                    .flex_none()
+                                                    .w(px(7.))
+                                                    .h(px(7.))
+                                                    .rounded_full()
+                                                    .bg(status),
                                             )
-                                            .when_some(status, |row, status| {
-                                                row.child(
-                                                    div()
-                                                        .flex_none()
-                                                        .w(px(7.))
-                                                        .h(px(7.))
-                                                        .rounded_full()
-                                                        .bg(status),
-                                                )
-                                            }),
-                                    )
-                            },
-                        ))
+                                        }),
+                                )
+                        }))
                     }),
             )
             .child(
@@ -681,6 +757,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn row_clicks_select_and_double_clicks_activate() {
+        let table = RowAction::Table(TableTarget {
+            profile_id: "profile".to_owned(),
+            schema_name: "public".to_owned(),
+            table_name: "products".to_owned(),
+        });
+        for action in [&table, &RowAction::Section] {
+            assert_eq!(action.interaction(false, 1), RowInteraction::Select);
+            assert_eq!(action.interaction(false, 3), RowInteraction::Select);
+            assert_eq!(action.interaction(true, 1), RowInteraction::Toggle);
+            assert_eq!(action.interaction(true, 2), RowInteraction::Select);
+        }
+        assert_eq!(table.interaction(false, 2), RowInteraction::OpenTable);
+        assert_eq!(
+            RowAction::Section.interaction(false, 2),
+            RowInteraction::Toggle
+        );
+        let schema = RowAction::Schema {
+            profile_id: "profile".to_owned(),
+            name: "public".to_owned(),
+        };
+        assert_eq!(schema.interaction(false, 2), RowInteraction::Toggle);
+    }
+
+    #[test]
     fn connection_status_colors_follow_the_current_palette() {
         let mut theme = Theme::default();
         assert_eq!(
@@ -701,22 +802,6 @@ mod tests {
         assert_ne!(
             DatabaseTree::table_key("profile", "a:b", "c"),
             DatabaseTree::table_key("profile", "a", "b:c"),
-        );
-    }
-
-    #[test]
-    fn column_labels_preserve_type_and_attributes() {
-        let column = TableColumn {
-            name: "name".to_owned(),
-            default: Some("'anonymous'".to_owned()),
-            is_nullable: false,
-            data_type: "varchar".to_owned(),
-            character_maximum_length: Some(80),
-            is_auto_increment: false,
-        };
-        assert_eq!(
-            DatabaseTree::column_label(&column),
-            "name: varchar(80) (not null, default 'anonymous')"
         );
     }
 }

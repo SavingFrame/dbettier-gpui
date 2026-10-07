@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::runtime;
-use gpui::{Context, EventEmitter};
+use gpui::{Context, EventEmitter, Task};
 
 use super::{
     catalog::{DatabaseSchema, LoadState},
@@ -9,9 +11,12 @@ use super::{
 
 pub(crate) struct DatabaseSession {
     state: DatabaseSessionState,
+    connection_task: Option<Task<()>>,
+    table_tasks: HashMap<String, Task<()>>,
 }
 
 pub(crate) enum DatabaseSessionState {
+    Disconnected,
     Connecting,
     Connected {
         connection: DatabaseConnection,
@@ -36,50 +41,39 @@ impl DatabaseSession {
         let profile_id = profile.uuid.clone();
         let profile_name = profile.name.clone();
 
-        cx.spawn(async move |session, cx| {
-            let result = runtime::spawn(cx, async move {
-                match DatabaseConnection::from_connection_profile(profile).await {
-                    Ok(connection) => {
-                        let schemas = connection.list_schemas().await;
-                        Ok((connection, schemas))
-                    }
-                    Err(error) => Err(error),
-                }
+        let connection_task = cx.spawn(async move |session, cx| {
+            let result = runtime::spawn_result(cx, "database connection", async move {
+                let connection = DatabaseConnection::from_connection_profile(profile).await?;
+                let schemas = connection.list_schemas().await;
+                Ok::<_, super::connection::DatabaseError>((connection, schemas))
             })
             .await;
 
             if let Err(error) = session.update(cx, |session, cx| {
                 session.state = match result {
-                    Ok(Ok((connection, schemas))) => DatabaseSessionState::Connected {
+                    Ok((connection, schemas)) => DatabaseSessionState::Connected {
                         connection,
-                        schemas: match schemas {
-                            Ok(schemas) => LoadState::Loaded(schemas),
-                            Err(error) => LoadState::Failed(error.to_string()),
-                        },
+                        schemas: LoadState::from_result(schemas),
                     },
-                    Ok(Err(error)) => DatabaseSessionState::Failed(error.to_string()),
-                    Err(error) => DatabaseSessionState::Failed(format!(
-                        "database connection task failed: {error}"
-                    )),
+                    Err(error) => {
+                        cx.emit(DatabaseSessionEvent::ConnectionFailed {
+                            profile_id,
+                            profile_name,
+                            error: error.clone(),
+                        });
+                        DatabaseSessionState::Failed(error)
+                    }
                 };
-
-                if let DatabaseSessionState::Failed(error) = &session.state {
-                    cx.emit(DatabaseSessionEvent::ConnectionFailed {
-                        profile_id,
-                        profile_name,
-                        error: error.clone(),
-                    });
-                }
-
                 cx.notify();
             }) {
                 eprintln!("failed to update database session after connecting: {error}");
             }
-        })
-        .detach();
+        });
 
         Self {
             state: DatabaseSessionState::Connecting,
+            connection_task: Some(connection_task),
+            table_tasks: HashMap::new(),
         }
     }
 
@@ -105,11 +99,12 @@ impl DatabaseSession {
         schema.tables = LoadState::Loading;
         let connection = connection.clone();
         let schema_name = schema_name.to_owned();
-        let schema_name_for_query = schema_name.clone();
+        let task_schema_name = schema_name.clone();
         cx.notify();
 
-        cx.spawn(async move |session, cx| {
-            let result = runtime::spawn(cx, async move {
+        let task = cx.spawn(async move |session, cx| {
+            let schema_name_for_query = task_schema_name.clone();
+            let result = runtime::spawn_result(cx, "database table loading", async move {
                 connection.list_tables(&schema_name_for_query).await
             })
             .await;
@@ -122,32 +117,38 @@ impl DatabaseSession {
                 else {
                     return;
                 };
-                let Some(schema) = schemas.iter_mut().find(|schema| schema.name == schema_name)
+                let Some(schema) = schemas
+                    .iter_mut()
+                    .find(|schema| schema.name == task_schema_name)
                 else {
                     return;
                 };
 
-                schema.tables = match result {
-                    Ok(Ok(tables)) => LoadState::Loaded(tables),
-                    Ok(Err(error)) => LoadState::Failed(error.to_string()),
-                    Err(error) => {
-                        LoadState::Failed(format!("database table loading task failed: {error}"))
-                    }
-                };
+                schema.tables = LoadState::from_result(result);
                 cx.notify();
             }) {
                 eprintln!("failed to update database session after loading tables: {error}");
             }
-        })
-        .detach();
+        });
+        self.table_tasks.insert(schema_name, task);
     }
 
-    pub(crate) fn disconnect(&self, cx: &mut Context<Self>) {
-        let DatabaseSessionState::Connected { connection, .. } = &self.state else {
-            return;
-        };
+    pub(crate) fn disconnect(&mut self, cx: &mut Context<Self>) {
+        self.connection_task = None;
+        self.table_tasks.clear();
+        let state = std::mem::replace(&mut self.state, DatabaseSessionState::Disconnected);
+        cx.notify();
 
-        let connection = connection.clone();
-        runtime::spawn(cx, async move { connection.close().await }).detach();
+        if let DatabaseSessionState::Connected { connection, .. } = state {
+            // Pool shutdown must finish even if the registry releases this session.
+            cx.spawn(async move |_, cx| {
+                if let Err(error) =
+                    runtime::spawn(cx, async move { connection.close().await }).await
+                {
+                    eprintln!("database disconnection task failed: {error}");
+                }
+            })
+            .detach();
+        }
     }
 }
