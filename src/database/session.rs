@@ -38,37 +38,7 @@ impl EventEmitter<DatabaseSessionEvent> for DatabaseSession {}
 
 impl DatabaseSession {
     pub(crate) fn new(profile: DatabaseConnectionProfile, cx: &mut Context<Self>) -> Self {
-        let profile_id = profile.uuid.clone();
-        let profile_name = profile.name.clone();
-
-        let connection_task = cx.spawn(async move |session, cx| {
-            let result = runtime::spawn_result(cx, "database connection", async move {
-                let connection = DatabaseConnection::from_connection_profile(profile).await?;
-                let schemas = connection.list_schemas().await;
-                Ok::<_, super::connection::DatabaseError>((connection, schemas))
-            })
-            .await;
-
-            if let Err(error) = session.update(cx, |session, cx| {
-                session.state = match result {
-                    Ok((connection, schemas)) => DatabaseSessionState::Connected {
-                        connection,
-                        schemas: LoadState::from_result(schemas),
-                    },
-                    Err(error) => {
-                        cx.emit(DatabaseSessionEvent::ConnectionFailed {
-                            profile_id,
-                            profile_name,
-                            error: error.clone(),
-                        });
-                        DatabaseSessionState::Failed(error)
-                    }
-                };
-                cx.notify();
-            }) {
-                eprintln!("failed to update database session after connecting: {error}");
-            }
-        });
+        let connection_task = Self::connect(profile, cx);
 
         Self {
             state: DatabaseSessionState::Connecting,
@@ -133,6 +103,39 @@ impl DatabaseSession {
         self.table_tasks.insert(schema_name, task);
     }
 
+    pub(crate) fn connect(profile: DatabaseConnectionProfile, cx: &mut Context<Self>) -> Task<()> {
+        let profile_id = profile.uuid.clone();
+        let profile_name = profile.name.clone();
+        cx.spawn(async move |session, cx| {
+            let result = runtime::spawn_result(cx, "database connection", async move {
+                let connection = DatabaseConnection::from_connection_profile(profile).await?;
+                let schemas = connection.list_schemas().await;
+                Ok::<_, super::connection::DatabaseError>((connection, schemas))
+            })
+            .await;
+
+            if let Err(error) = session.update(cx, |session, cx| {
+                session.state = match result {
+                    Ok((connection, schemas)) => DatabaseSessionState::Connected {
+                        connection,
+                        schemas: LoadState::from_result(schemas),
+                    },
+                    Err(error) => {
+                        cx.emit(DatabaseSessionEvent::ConnectionFailed {
+                            profile_id,
+                            profile_name,
+                            error: error.clone(),
+                        });
+                        DatabaseSessionState::Failed(error)
+                    }
+                };
+                cx.notify();
+            }) {
+                eprintln!("failed to update database session after connecting: {error}");
+            }
+        })
+    }
+
     pub(crate) fn disconnect(&mut self, cx: &mut Context<Self>) {
         self.connection_task = None;
         self.table_tasks.clear();
@@ -150,5 +153,13 @@ impl DatabaseSession {
             })
             .detach();
         }
+    }
+
+    pub(crate) fn reconnect(&mut self, cx: &mut Context<Self>, profile: DatabaseConnectionProfile) {
+        self.disconnect(cx);
+        let task = Self::connect(profile, cx);
+        self.connection_task = Some(task);
+        self.state = DatabaseSessionState::Connecting;
+        cx.notify();
     }
 }

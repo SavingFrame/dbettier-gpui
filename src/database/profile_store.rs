@@ -68,6 +68,13 @@ impl DatabaseProfileStore {
         &self.profiles
     }
 
+    pub(crate) fn get(&self, profile_uuid: &str) -> Option<DatabaseConnectionProfile> {
+        self.profiles()
+            .iter()
+            .find(|profile| profile.uuid == profile_uuid)
+            .cloned()
+    }
+
     pub(crate) fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
     }

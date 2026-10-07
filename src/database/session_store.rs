@@ -48,13 +48,17 @@ impl DatabaseSessionStore {
         profile: DatabaseConnectionProfile,
         cx: &mut Context<Self>,
     ) -> Entity<DatabaseSession> {
-        if let Some(session) = self.session(&profile.uuid)
-            && matches!(
-                session.read(cx).state(),
-                DatabaseSessionState::Connecting | DatabaseSessionState::Connected { .. }
-            )
-        {
-            return session.clone();
+        if let Some(session) = self.session(&profile.uuid) {
+            match session.read(cx).state() {
+                DatabaseSessionState::Connecting | DatabaseSessionState::Connected { .. } => {
+                    return session.clone();
+                }
+                DatabaseSessionState::Disconnected | DatabaseSessionState::Failed(_) => {
+                    session.update(cx, |session, cx| session.reconnect(cx, profile));
+                    cx.notify();
+                    return session.clone();
+                }
+            }
         }
 
         let profile_id = profile.uuid.clone();

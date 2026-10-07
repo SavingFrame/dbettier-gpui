@@ -8,7 +8,7 @@ use gpui::{Context, Entity, Pixels, Subscription, Window, base::StyledExt, div, 
 use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
     notification::Notification,
-    resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
+    resizable::{ResizableState, h_resizable, resizable_panel},
 };
 
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -39,6 +39,7 @@ const MIN_MAIN_CONTENT_WIDTH: Pixels = px(320.);
 pub(crate) struct Workspace {
     profile_store: Entity<DatabaseProfileStore>,
     _profile_store_subscription: Subscription,
+    session_store: Entity<DatabaseSessionStore>,
     _session_store_subscription: Subscription,
     database_tree: Entity<DatabaseTree>,
     _database_tree_subscrtion: Subscription,
@@ -91,6 +92,7 @@ impl Workspace {
         Self {
             profile_store,
             _profile_store_subscription: profile_store_subscription,
+            session_store,
             _session_store_subscription: session_store_subscription,
             database_tree: database_tree,
             _database_tree_subscrtion: database_tree_subscription,
@@ -104,7 +106,17 @@ impl Workspace {
     }
 
     fn open_table(&mut self, table: &TableTarget, window: &mut Window, cx: &mut Context<Self>) {
-        let tab = cx.new(|cx| WorkspaceTab::new(table.table_name.clone(), window, cx));
+        let Some(profile) = self.profile_store.read(cx).get(&table.profile_id) else {
+            window.push_notification(
+                Notification::error("The connection profile no longer exists"),
+                cx,
+            );
+            return;
+        };
+        let session = self
+            .session_store
+            .update(cx, |session, cx| session.connect(profile, cx));
+        let tab = cx.new(|cx| WorkspaceTab::new(table.clone(), session, window, cx));
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
         cx.notify();
