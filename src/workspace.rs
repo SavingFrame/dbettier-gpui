@@ -1,4 +1,5 @@
 mod database_tree;
+mod query;
 mod query_editor;
 mod status_bar;
 mod tab_bar;

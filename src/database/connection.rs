@@ -1,3 +1,5 @@
+use crate::database::result::QueryOutput;
+
 use super::{
     catalog::{DatabaseSchema, DatabaseTable},
     postgres::PostgresDriver,
@@ -18,6 +20,9 @@ pub enum DatabaseError {
         #[source]
         source: sqlx::Error,
     },
+
+    #[error("failed to execute query: {0}")]
+    ExecuteQuery(#[source] sqlx::Error),
 }
 
 #[derive(Clone)]
@@ -38,6 +43,15 @@ impl DatabaseConnection {
                 .list_schemas()
                 .await
                 .map_err(DatabaseError::ListSchemas),
+        }
+    }
+
+    pub async fn execute_query(&self, query: String) -> Result<QueryOutput, DatabaseError> {
+        match self {
+            DatabaseConnection::PostgreSql(database) => database
+                .execute_query(query)
+                .await
+                .map_err(DatabaseError::ExecuteQuery),
         }
     }
 

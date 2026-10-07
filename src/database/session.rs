@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::runtime;
+use crate::{database::result::QueryOutput, runtime};
 use gpui::{Context, EventEmitter, Task};
 
 use super::{
@@ -161,5 +161,19 @@ impl DatabaseSession {
         self.connection_task = Some(task);
         self.state = DatabaseSessionState::Connecting;
         cx.notify();
+    }
+
+    pub(crate) fn execute_query(
+        &self,
+        cx: &mut Context<Self>,
+        query: String,
+    ) -> Result<Task<Result<QueryOutput, String>>, String> {
+        let DatabaseSessionState::Connected { connection, .. } = &self.state else {
+            return Err("Cannot execute query: database is not ocnnected".to_owned());
+        };
+        let connection = connection.clone();
+        Ok(runtime::spawn_result(cx, "query execution", async move {
+            connection.execute_query(query).await
+        }))
     }
 }

@@ -4,6 +4,7 @@ mod postgres;
 mod profile;
 pub(crate) mod profile_storage;
 pub(crate) mod profile_store;
+pub(crate) mod result;
 pub(crate) mod session;
 pub(crate) mod session_store;
 

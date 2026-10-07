@@ -1,10 +1,14 @@
-use std::collections::HashMap;
+use futures::TryStreamExt;
+use std::{collections::HashMap, time::Instant};
 
-use sqlx::{Connection, PgPool, Row, postgres::PgConnection};
+use sqlx::{
+    Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo, postgres::PgConnection,
+};
 
 use crate::database::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
     TableIndex,
+    result::{QueryOutput, ResultColumn},
 };
 
 #[derive(Clone)]
@@ -185,6 +189,52 @@ impl PostgresDriver {
             table.indexes = indexes_by_table.remove(&table.name).unwrap_or_default();
         }
         Ok(())
+    }
+
+    pub async fn execute_query(&self, query: String) -> Result<QueryOutput, sqlx::Error> {
+        let started = Instant::now();
+
+        let mut stream = sqlx::raw_sql(sqlx::AssertSqlSafe(query)).fetch_many(&self.pool);
+
+        let mut rows = Vec::new();
+        let mut rows_affected = 0;
+
+        while let Some(result) = stream.try_next().await? {
+            match result {
+                Either::Left(result) => rows_affected += result.rows_affected(),
+                Either::Right(row) => rows.push(row),
+            }
+        }
+        let columns = match rows.first() {
+            Some(row) => row
+                .columns()
+                .iter()
+                .map(|column| ResultColumn {
+                    name: column.name().to_owned(),
+                    column_type: column.type_info().name().to_owned(),
+                })
+                .collect(),
+            None => {
+                let description = self
+                    .pool
+                    .describe(sqlx::AssertSqlSafe(query).into_sql_str())
+                    .await?;
+                description
+                    .columns()
+                    .iter()
+                    .map(|column| ResultColumn {
+                        name: column.name().to_owned(),
+                        column_type: column.type_info().name().to_owned(),
+                    })
+                    .collect()
+            }
+        };
+        Ok(QueryOutput {
+            rows,
+            rows_affected,
+            columns,
+            elapsed: started.elapsed(),
+        })
     }
 
     pub async fn new(connection_uri: String) -> Result<Self, sqlx::Error> {
