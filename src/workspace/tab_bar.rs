@@ -15,9 +15,8 @@ use gpui_kit::component::{
 
 pub(crate) struct WorkspaceTab {
     pub(crate) title: String,
-    database_profile: Entity<DatabaseConnectionProfile>,
-    database_session: Entity<DatabaseSession>,
-
+    // database_profile: Entity<DatabaseConnectionProfile>,
+    // database_session: Entity<DatabaseSession>,
     query_editor: Entity<QueryEditor>,
     table_view: Entity<TableView>,
     vertical_layout: Entity<ResizableState>,
@@ -28,28 +27,36 @@ const DEFAULT_QUERY_EDITOR_HEIGHT: Pixels = px(260.);
 const MAX_QUERY_EDITOR_HEIGHT: Pixels = px(600.);
 const MIN_TABLE_VIEW_HEIGHT: Pixels = px(120.);
 
+impl WorkspaceTab {
+    pub(crate) fn new(title: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            title,
+            query_editor: cx.new(|_| QueryEditor),
+            table_view: cx.new(|cx| TableView::new(window, cx)),
+            vertical_layout: cx.new(|_| ResizableState::default()),
+        }
+    }
+}
+
 impl Render for WorkspaceTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        resizable_panel()
-            .size_range(MIN_MAIN_CONTENT_WIDTH..Pixels::MAX)
-            .overflow_hidden()
-            .child(
-                v_resizable("workspace-vertical")
-                    .with_state(&self.vertical_layout)
-                    .child(
-                        resizable_panel()
-                            .size_range(MIN_TABLE_VIEW_HEIGHT..Pixels::MAX)
-                            .overflow_hidden()
-                            .child(self.table_view.clone()),
-                    )
-                    .child(
-                        resizable_panel()
-                            .size(DEFAULT_QUERY_EDITOR_HEIGHT)
-                            .size_range(MIN_QUERY_EDITOR_HEIGHT..MAX_QUERY_EDITOR_HEIGHT)
-                            .flex_none()
-                            .overflow_hidden()
-                            .child(self.query_editor.clone()),
-                    ),
-            )
+        div().child(
+            v_resizable("workspace-vertical")
+                .with_state(&self.vertical_layout)
+                .child(
+                    resizable_panel()
+                        .size_range(MIN_TABLE_VIEW_HEIGHT..Pixels::MAX)
+                        .overflow_hidden()
+                        .child(self.table_view.clone()),
+                )
+                .child(
+                    resizable_panel()
+                        .size(DEFAULT_QUERY_EDITOR_HEIGHT)
+                        .size_range(MIN_QUERY_EDITOR_HEIGHT..MAX_QUERY_EDITOR_HEIGHT)
+                        .flex_none()
+                        .overflow_hidden()
+                        .child(self.query_editor.clone()),
+                ),
+        )
     }
 }

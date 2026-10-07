@@ -7,7 +7,9 @@ use std::{
     rc::Rc,
 };
 
-use gpui::{Context, Entity, SharedString, Subscription, Window, div, prelude::*, px};
+use gpui::{
+    Context, Entity, EventEmitter, SharedString, Subscription, Window, div, prelude::*, px,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Theme,
@@ -16,8 +18,10 @@ use gpui_kit::component::{
 };
 
 use crate::database::{profile_store::DatabaseProfileStore, session_store::DatabaseSessionStore};
-use model::{RowAction, RowInfo, TableSection, TableTarget, TreeBuilder};
+use model::{RowAction, RowInfo, TableSection, TreeBuilder};
 use row::{DatabaseTreeRow, RowInteraction};
+
+pub(super) use model::TableTarget;
 
 pub(crate) struct DatabaseTree {
     profile_store: Entity<DatabaseProfileStore>,
@@ -30,6 +34,12 @@ pub(crate) struct DatabaseTree {
     _session_store_subscription: Subscription,
     _tree_subscription: Subscription,
 }
+
+pub(super) enum DatabaseTreeEvent {
+    OpenTable(TableTarget),
+}
+
+impl EventEmitter<DatabaseTreeEvent> for DatabaseTree {}
 
 impl DatabaseTree {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
@@ -140,7 +150,7 @@ impl DatabaseTree {
             RowInteraction::Select => return,
             RowInteraction::OpenTable => {
                 if let RowAction::Table(target) = action {
-                    self.on_open_table(&target);
+                    self.on_open_table(&target, cx);
                 }
                 return;
             }
@@ -155,11 +165,12 @@ impl DatabaseTree {
         self.rebuild(cx);
     }
 
-    fn on_open_table(&mut self, target: &TableTarget) {
+    fn on_open_table(&mut self, target: &TableTarget, cx: &mut Context<Self>) {
         eprintln!(
             "Open table: profile={}, schema={}, table={}",
             target.profile_id, target.schema_name, target.table_name,
         );
+        cx.emit(DatabaseTreeEvent::OpenTable(target.clone()));
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {

@@ -52,10 +52,10 @@ pub(super) enum RowAction {
 }
 
 #[derive(Clone)]
-pub(super) struct TableTarget {
-    pub(super) profile_id: String,
-    pub(super) schema_name: String,
-    pub(super) table_name: String,
+pub(crate) struct TableTarget {
+    pub(crate) profile_id: String,
+    pub(crate) schema_name: String,
+    pub(crate) table_name: String,
 }
 
 #[derive(Clone, Copy)]
