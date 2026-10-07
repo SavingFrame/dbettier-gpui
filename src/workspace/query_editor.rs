@@ -1,14 +1,53 @@
-use gpui::{Context, Window, div, prelude::*, px};
+use gpui::{App, Context, FocusHandle, Focusable, Window, div, prelude::*, px};
 
 use gpui_kit::{
     assets::IconName,
     component::{
         ActiveTheme as _, Sizable as _,
         button::{Button, ButtonVariants as _},
+        dock::{BasePanel, Panel, PanelEvent},
     },
 };
 
-pub(crate) struct QueryEditor;
+pub(crate) struct QueryEditor {
+    focus_handle: FocusHandle,
+}
+
+impl QueryEditor {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+        }
+    }
+}
+
+impl Focusable for QueryEditor {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl gpui::EventEmitter<PanelEvent> for QueryEditor {}
+
+impl BasePanel for QueryEditor {
+    fn panel_name(&self) -> &'static str {
+        "QueryEditor"
+    }
+
+    fn closable(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
+
+impl Panel for QueryEditor {
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        "Query editor"
+    }
+
+    fn inner_padding(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
 
 impl Render for QueryEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -22,6 +61,7 @@ impl Render for QueryEditor {
         ];
 
         div()
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()

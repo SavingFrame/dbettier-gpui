@@ -3,6 +3,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
     button::{Button, ButtonVariants as _},
+    dock::{BasePanel, Panel, PanelEvent},
     table::{Column, DataTable, TableDelegate, TableState},
 };
 
@@ -171,13 +172,41 @@ impl TableView {
     }
 }
 
+impl gpui::Focusable for TableView {
+    fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        self.state.read(cx).focus_handle(cx)
+    }
+}
+
+impl gpui::EventEmitter<PanelEvent> for TableView {}
+
+impl BasePanel for TableView {
+    fn panel_name(&self) -> &'static str {
+        "QueryResults"
+    }
+
+    fn closable(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
+
+impl Panel for TableView {
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        "Results"
+    }
+
+    fn inner_padding(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
+
 impl Render for TableView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let row_count = self.state.read(cx).delegate().rows.len();
 
         div()
-            .flex_1()
+            .size_full()
             .min_w_0()
             .min_h_0()
             .flex()

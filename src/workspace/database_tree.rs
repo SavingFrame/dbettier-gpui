@@ -14,6 +14,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Theme,
     button::{Button, ButtonVariants as _},
+    dock::{BasePanel, Panel, PanelEvent},
     tree::{TreeEvent, TreeItem, TreeState, tree},
 };
 
@@ -24,6 +25,7 @@ use row::{DatabaseTreeRow, RowInteraction};
 pub(super) use model::TableTarget;
 
 pub(crate) struct DatabaseTree {
+    focus_handle: gpui::FocusHandle,
     profile_store: Entity<DatabaseProfileStore>,
     session_store: Entity<DatabaseSessionStore>,
     tree_state: Entity<TreeState>,
@@ -57,6 +59,7 @@ impl DatabaseTree {
         });
 
         let mut tree = Self {
+            focus_handle: cx.focus_handle(),
             profile_store,
             session_store,
             tree_state,
@@ -198,6 +201,34 @@ impl DatabaseTree {
     }
 }
 
+impl gpui::Focusable for DatabaseTree {
+    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl gpui::EventEmitter<PanelEvent> for DatabaseTree {}
+
+impl BasePanel for DatabaseTree {
+    fn panel_name(&self) -> &'static str {
+        "DatabaseTree"
+    }
+
+    fn closable(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
+
+impl Panel for DatabaseTree {
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        "Database"
+    }
+
+    fn inner_padding(&self, _: &gpui::App) -> bool {
+        false
+    }
+}
+
 impl Render for DatabaseTree {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
@@ -206,6 +237,7 @@ impl Render for DatabaseTree {
         let empty = self.profile_store.read(cx).profiles().is_empty();
 
         div()
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()

@@ -4,52 +4,33 @@ mod status_bar;
 mod tab_bar;
 mod table_view;
 
-use gpui::{Context, Entity, Pixels, Subscription, Window, base::StyledExt, div, prelude::*, px};
+use gpui::{Context, Entity, Subscription, Window, div, prelude::*, px};
 use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
+    dock::{DockArea, DockLayout, DockPlacement, DockSkin, PanelStyle, panel_handle},
     notification::Notification,
-    resizable::{ResizableState, h_resizable, resizable_panel},
 };
-
-use gpui_kit::component::tab::{Tab, TabBar};
 
 use self::{
-    database_tree::DatabaseTree, query_editor::QueryEditor, status_bar::StatusBar,
-    table_view::TableView,
+    database_tree::{DatabaseTree, DatabaseTreeEvent, TableTarget},
+    status_bar::StatusBar,
+    tab_bar::WorkspaceTab,
 };
-use crate::{
-    database::{
-        profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
-        session_store::DatabaseSessionStore,
-    },
-    workspace::{
-        DatabaseTreeEvent::OpenTable,
-        database_tree::{DatabaseTreeEvent, TableTarget},
-        tab_bar::WorkspaceTab,
-    },
+use crate::database::{
+    profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
+    session_store::DatabaseSessionStore,
 };
 
 struct ConnectionErrorNotification;
-
-const DEFAULT_DATABASE_TREE_WIDTH: Pixels = px(280.);
-const MIN_DATABASE_TREE_WIDTH: Pixels = px(180.);
-const MAX_DATABASE_TREE_WIDTH: Pixels = px(520.);
-const MIN_MAIN_CONTENT_WIDTH: Pixels = px(320.);
 
 pub(crate) struct Workspace {
     profile_store: Entity<DatabaseProfileStore>,
     _profile_store_subscription: Subscription,
     session_store: Entity<DatabaseSessionStore>,
     _session_store_subscription: Subscription,
-    database_tree: Entity<DatabaseTree>,
-    _database_tree_subscrtion: Subscription,
-    table_view: Entity<TableView>,
-    query_editor: Entity<QueryEditor>,
+    _database_tree_subscription: Subscription,
     status_bar: Entity<StatusBar>,
-    horizontal_layout: Entity<ResizableState>,
-    active_tab: usize,
-
-    tabs: Vec<Entity<WorkspaceTab>>,
+    dock_area: Entity<DockArea>,
 }
 
 impl Workspace {
@@ -83,25 +64,28 @@ impl Workspace {
             &database_tree,
             window,
             |workspace, _, event: &DatabaseTreeEvent, window, cx| match event {
-                DatabaseTreeEvent::OpenTable(target) => {
-                    workspace.open_table(target, window, cx);
-                }
+                DatabaseTreeEvent::OpenTable(target) => workspace.open_table(target, window, cx),
             },
         );
+        let (dock_area, skin) = DockSkin::dock_area("workspace", Some(1), window, cx);
+        skin.set_panel_style(PanelStyle::TabBar, cx);
+        skin.set_close_button_visible(true, cx);
+        let left = DockLayout::tabs().panel_view(panel_handle(database_tree), cx);
+        dock_area.update(cx, |area, cx| {
+            area.set_center(DockLayout::tabs(), window, cx);
+            area.set_dock(DockPlacement::Left, left, window, cx);
+            area.set_dock_size(DockPlacement::Left, px(280.), window, cx);
+            area.set_dock_collapsible(DockPlacement::Left, true, window, cx);
+        });
 
         Self {
             profile_store,
             _profile_store_subscription: profile_store_subscription,
             session_store,
             _session_store_subscription: session_store_subscription,
-            database_tree: database_tree,
-            _database_tree_subscrtion: database_tree_subscription,
-            table_view: cx.new(|cx| TableView::new(window, cx)),
-            query_editor: cx.new(|_| QueryEditor),
+            _database_tree_subscription: database_tree_subscription,
             status_bar: cx.new(|_| StatusBar),
-            horizontal_layout: cx.new(|_| ResizableState::default()),
-            active_tab: 0,
-            tabs: Vec::new(),
+            dock_area,
         }
     }
 
@@ -115,16 +99,17 @@ impl Workspace {
         };
         let session = self
             .session_store
-            .update(cx, |session, cx| session.connect(profile, cx));
-        let tab = cx.new(|cx| WorkspaceTab::new(table.clone(), session, window, cx));
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
-        cx.notify();
+            .update(cx, |store, cx| store.connect(profile, cx));
+        let document = cx.new(|cx| WorkspaceTab::new(table.clone(), session, window, cx));
+        let document = panel_handle(document);
+        self.dock_area.update(cx, |area, cx| {
+            area.add_panel_view(document, DockPlacement::Center, None, window, cx);
+        });
     }
 }
 
 impl Render for Workspace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let database_profile_load_error =
             self.profile_store.read(cx).load_error().map(str::to_owned);
         let theme = cx.theme();
@@ -152,43 +137,11 @@ impl Render for Workspace {
                 )
             })
             .child(
-                div().flex_1().min_h_0().min_w_0().child(
-                    h_resizable("workspace-horizontal")
-                        .with_state(&self.horizontal_layout)
-                        .child(
-                            resizable_panel()
-                                .size(DEFAULT_DATABASE_TREE_WIDTH)
-                                .size_range(MIN_DATABASE_TREE_WIDTH..MAX_DATABASE_TREE_WIDTH)
-                                .flex_none()
-                                .overflow_hidden()
-                                .child(self.database_tree.clone()),
-                        )
-                        .child(
-                            resizable_panel()
-                                .size_range(MIN_MAIN_CONTENT_WIDTH..Pixels::MAX)
-                                .flex_col()
-                                .overflow_hidden()
-                                .v_flex()
-                                .child(
-                                    TabBar::new("tabs")
-                                        .selected_index(self.active_tab)
-                                        .on_click(cx.listener(|view, index, _, cx| {
-                                            view.active_tab = *index;
-                                            cx.notify();
-                                        }))
-                                        .children(self.tabs.iter().map(|tab| {
-                                            Tab::new().label(tab.read(cx).title.clone())
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .when(self.tabs.is_empty(), |content| content)
-                                        .when(!self.tabs.is_empty(), |content| {
-                                            content.child(self.tabs[self.active_tab].clone())
-                                        }),
-                                ),
-                        ),
-                ),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .child(self.dock_area.clone()),
             )
             .child(self.status_bar.clone())
     }
