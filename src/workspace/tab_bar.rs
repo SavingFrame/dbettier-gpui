@@ -24,7 +24,7 @@ impl WorkspaceTab {
         // Each document owns its area so dragging a tool cannot detach it from its document.
         let (dock_area, _) =
             DockSkin::dock_area(format!("document-{}", cx.entity_id()), Some(1), window, cx);
-        let query_editor = cx.new(QueryEditor::new);
+        let query_editor = cx.new(|cx| QueryEditor::new(window, cx));
         let table_view = cx.new(|cx| TableView::new(window, cx));
         let center = DockLayout::tabs().panel_view(panel_handle(table_view), cx);
         let bottom = DockLayout::tabs().panel_view(panel_handle(query_editor), cx);

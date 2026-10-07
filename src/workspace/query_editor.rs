@@ -1,29 +1,40 @@
-use gpui::{App, Context, FocusHandle, Focusable, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Window, div, prelude::*, px};
 
 use gpui_kit::{
     assets::IconName,
     component::{
-        ActiveTheme as _, Sizable as _,
+        ActiveTheme as _, Disableable as _, Sizable as _,
         button::{Button, ButtonVariants as _},
         dock::{BasePanel, Panel, PanelEvent},
+        input::{Editor, EditorState, TabSize},
     },
 };
 
 pub(crate) struct QueryEditor {
-    focus_handle: FocusHandle,
+    editor: Entity<EditorState>,
 }
 
 impl QueryEditor {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        Self {
-            focus_handle: cx.focus_handle(),
-        }
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .line_number(true)
+                .folding(true)
+                .tab_size(TabSize {
+                    tab_size: 4,
+                    hard_tabs: false,
+                })
+                .searchable(true)
+                .default_value("SELECT id, name, category, price, updated_at from products;")
+        });
+        Self { editor }
     }
 }
 
 impl Focusable for QueryEditor {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.editor.read(cx).focus_handle(cx)
     }
 }
 
@@ -50,77 +61,39 @@ impl Panel for QueryEditor {
 }
 
 impl Render for QueryEditor {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let code_lines = [
-            ("1", "SELECT id, name, category, price, updated_at"),
-            ("2", "FROM public.products"),
-            ("3", "WHERE category = 'Accessories'"),
-            ("4", "ORDER BY updated_at DESC"),
-            ("5", "LIMIT 100;"),
-        ];
-
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.background)
+            .min_h_0()
+            .overflow_hidden()
+            .bg(cx.theme().background)
             .child(
                 div()
                     .h(px(40.))
                     .flex_none()
                     .flex()
                     .items_center()
-                    .justify_between()
                     .px_3()
                     .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child("query.sql"),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(theme.muted_foreground)
-                                    .child("dbettier / public"),
-                            ),
-                    )
+                    .border_color(cx.theme().border)
                     .child(
                         Button::new("run-query")
                             .ghost()
                             .small()
                             .icon(IconName::Play)
                             .label("Run")
-                            .tooltip("Run query (execution not implemented yet)"),
+                            .disabled(true)
+                            .tooltip("Query execution is not connected yet"),
                     ),
             )
             .child(
                 div()
                     .flex_1()
-                    .p_3()
-                    .font_family("monospace")
-                    .text_sm()
-                    .children(code_lines.into_iter().map(|(number, code)| {
-                        div()
-                            .flex()
-                            .h_6()
-                            .child(
-                                div()
-                                    .w(px(36.))
-                                    .flex_none()
-                                    .text_color(theme.muted_foreground)
-                                    .child(number),
-                            )
-                            .child(div().text_color(theme.foreground).child(code))
-                    })),
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(Editor::new(&self.editor).h_full().bordered(false)),
             )
     }
 }
