@@ -2,7 +2,8 @@ use futures::TryStreamExt;
 use std::{collections::HashMap, time::Instant};
 
 use sqlx::{
-    Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo, postgres::PgConnection,
+    Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo,
+    postgres::PgConnection, query,
 };
 
 use crate::database::{
@@ -194,7 +195,8 @@ impl PostgresDriver {
     pub async fn execute_query(&self, query: String) -> Result<QueryOutput, sqlx::Error> {
         let started = Instant::now();
 
-        let mut stream = sqlx::raw_sql(sqlx::AssertSqlSafe(query)).fetch_many(&self.pool);
+        let sql = sqlx::AssertSqlSafe(query).into_sql_str();
+        let mut stream = sqlx::raw_sql(sql.clone()).fetch_many(&self.pool);
 
         let mut rows = Vec::new();
         let mut rows_affected = 0;
@@ -215,10 +217,7 @@ impl PostgresDriver {
                 })
                 .collect(),
             None => {
-                let description = self
-                    .pool
-                    .describe(sqlx::AssertSqlSafe(query).into_sql_str())
-                    .await?;
+                let description = self.pool.describe(sql).await?;
                 description
                     .columns()
                     .iter()

@@ -10,12 +10,19 @@ use gpui_kit::{
     },
 };
 
+use crate::workspace::query::QueryState;
+
 pub(crate) struct QueryEditor {
     editor: Entity<EditorState>,
+    query_state: Entity<QueryState>,
 }
 
 impl QueryEditor {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        query_state: Entity<QueryState>,
+    ) -> Self {
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("sql")
@@ -28,7 +35,10 @@ impl QueryEditor {
                 .searchable(true)
                 .default_value("SELECT id, name, category, price, updated_at from products;")
         });
-        Self { editor }
+        Self {
+            editor,
+            query_state,
+        }
     }
 }
 

@@ -1,160 +1,154 @@
-use gpui::{App, Context, Entity, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Sizable as _, Size,
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelEvent},
+    spinner::Spinner,
     table::{Column, DataTable, TableDelegate, TableState},
 };
+use sqlx::Row;
 
-const COLUMNS: [(&str, f32); 6] = [
-    ("#", 56.),
-    ("id", 110.),
-    ("name", 260.),
-    ("category", 170.),
-    ("price", 120.),
-    ("updated_at", 150.),
-];
-
-// Placeholder results until query execution supplies a result set.
-const SAMPLE_ROWS: [[&str; 6]; 9] = [
-    [
-        "1",
-        "1042",
-        "Wireless Keyboard",
-        "Accessories",
-        "$89.00",
-        "2025-04-18",
-    ],
-    [
-        "2",
-        "1043",
-        "Studio Display Stand",
-        "Displays",
-        "$149.00",
-        "2025-04-18",
-    ],
-    [
-        "3",
-        "1044",
-        "USB-C Dock",
-        "Accessories",
-        "$119.00",
-        "2025-04-17",
-    ],
-    [
-        "4",
-        "1045",
-        "Mechanical Keyboard",
-        "Accessories",
-        "$129.00",
-        "2025-04-17",
-    ],
-    [
-        "5",
-        "1046",
-        "Ergonomic Mouse",
-        "Accessories",
-        "$79.00",
-        "2025-04-16",
-    ],
-    [
-        "6",
-        "1047",
-        "27-inch Monitor",
-        "Displays",
-        "$449.00",
-        "2025-04-15",
-    ],
-    [
-        "7",
-        "1048",
-        "Laptop Stand",
-        "Office",
-        "$64.00",
-        "2025-04-15",
-    ],
-    ["8", "1049", "Desk Mat", "Office", "$35.00", "2025-04-14"],
-    ["9", "1050", "Webcam Light", "Video", "$54.00", "2025-04-14"],
-];
+use crate::workspace::query::QueryState;
 
 struct ResultsTable {
-    columns: Vec<Column>,
-    rows: Vec<Vec<String>>,
+    query_state: Entity<QueryState>,
 }
 
 impl ResultsTable {
-    fn sample() -> Self {
-        Self {
-            columns: COLUMNS
-                .into_iter()
-                .map(|(name, width)| Column::new(name, name).width(px(width)).movable(false))
-                .collect(),
-            rows: SAMPLE_ROWS
-                .into_iter()
-                .map(|row| row.into_iter().map(str::to_owned).collect())
-                .collect(),
-        }
-    }
-
-    fn cell(&self, row: usize, column: usize) -> &str {
-        self.rows
-            .get(row)
-            .and_then(|row| row.get(column))
-            .map(String::as_str)
-            .unwrap_or_default()
+    fn new(query_state: Entity<QueryState>) -> Self {
+        Self { query_state }
     }
 }
 
 impl TableDelegate for ResultsTable {
-    fn columns_count(&self, _cx: &App) -> usize {
-        self.columns.len()
+    fn columns_count(&self, cx: &App) -> usize {
+        self.query_state
+            .read(cx)
+            .results
+            .as_ref()
+            .map_or(0, |output| output.columns.len())
     }
 
-    fn rows_count(&self, _cx: &App) -> usize {
-        self.rows.len()
+    fn rows_count(&self, cx: &App) -> usize {
+        self.query_state
+            .read(cx)
+            .results
+            .as_ref()
+            .map_or(0, |output| output.rows.len())
     }
 
-    fn column(&self, column: usize, _cx: &App) -> Column {
-        self.columns.get(column).cloned().unwrap_or_default()
+    fn column(&self, column_index: usize, cx: &App) -> Column {
+        self.query_state
+            .read(cx)
+            .results
+            .as_ref()
+            .and_then(|output| output.columns.get(column_index))
+            .map(|column| Column::new(format!("column-{column_index}"), column.name.clone()))
+            .unwrap_or_default()
     }
 
-    fn render_td(
+    fn loading(&self, cx: &App) -> bool {
+        self.query_state.read(cx).is_loading()
+    }
+
+    fn render_loading(
         &mut self,
-        row: usize,
-        column: usize,
+        _size: Size,
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .text_color(cx.theme().muted_foreground)
+            .child(Spinner::new())
+            .child("Loading results…")
+    }
+
+    fn render_empty(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let message = self
+            .query_state
+            .read(cx)
+            .error_string
+            .clone()
+            .unwrap_or_else(|| "No rows returned".to_owned());
+
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(cx.theme().muted_foreground)
+            .child(message)
+    }
+
+    fn render_td(
+        &mut self,
+        row_index: usize,
+        column_index: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let text = match self
+            .query_state
+            .read(cx)
+            .results
+            .as_ref()
+            .and_then(|output| output.rows.get(row_index))
+        {
+            Some(row) => match row.try_get::<Option<String>, _>(column_index) {
+                Ok(Some(value)) => value,
+                Ok(None) => "NULL".to_owned(),
+                Err(error) => format!("decode error: {error}"),
+            },
+            None => "Missing row".to_owned(),
+        };
+        div()
             .w_full()
             .min_w_0()
             .truncate()
-            .when(column == 0 || column == 5, |cell| {
-                cell.text_color(cx.theme().muted_foreground)
-            })
-            .child(self.cell(row, column).to_owned())
-    }
-
-    fn cell_text(&self, row: usize, column: usize, _cx: &App) -> String {
-        self.cell(row, column).to_owned()
+            .text_color(cx.theme().foreground)
+            .child(text)
     }
 }
 
 pub(crate) struct TableView {
     state: Entity<TableState<ResultsTable>>,
+    query_state: Entity<QueryState>,
+    _query_observation: Subscription,
 }
 
 impl TableView {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        query_state: Entity<QueryState>,
+    ) -> Self {
         let state = cx.new(|cx| {
-            let mut state = TableState::new(ResultsTable::sample(), window, cx)
+            TableState::new(ResultsTable::new(query_state.clone()), window, cx)
                 .row_selectable(true)
-                .col_selectable(false);
-            state.set_selected_row(2, cx);
-            state
+                .col_selectable(false)
         });
-        Self { state }
+        let query_observation = cx.observe(&query_state, |view, _, cx| {
+            view.state.update(cx, |state, cx| {
+                state.refresh(cx);
+                cx.notify();
+            });
+            cx.notify();
+        });
+        Self {
+            state,
+            query_state,
+            _query_observation: query_observation,
+        }
     }
 
     fn toolbar_button(
@@ -203,7 +197,17 @@ impl Panel for TableView {
 impl Render for TableView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let row_count = self.state.read(cx).delegate().rows.len();
+        let query_state = self.query_state.read(cx);
+        let loading = query_state.is_loading();
+        let disabled = loading || query_state.results.is_none();
+        let row_count = self.state.read(cx).delegate().rows_count(cx);
+        let summary = if loading {
+            "Loading results…".to_owned()
+        } else if let Some(error) = &query_state.error_string {
+            error.clone()
+        } else {
+            format!("{row_count} rows")
+        };
 
         div()
             .size_full()
@@ -228,36 +232,43 @@ impl Render for TableView {
                             .flex()
                             .items_center()
                             .gap_1()
-                            .child(Self::toolbar_button(
-                                "add-row",
-                                "Row",
-                                IconName::Plus,
-                                "Add a row",
-                            ))
-                            .child(Self::toolbar_button(
-                                "refresh-results",
-                                "Refresh",
-                                IconName::RefreshCw,
-                                "Refresh results",
-                            ))
-                            .child(Self::toolbar_button(
-                                "filter-results",
-                                "Filter",
-                                IconName::ListFilter,
-                                "Filter results",
-                            ))
-                            .child(Self::toolbar_button(
-                                "sort-results",
-                                "Sort",
-                                IconName::ArrowUpDown,
-                                "Sort results",
-                            )),
+                            .child(
+                                Self::toolbar_button("add-row", "Row", IconName::Plus, "Add a row")
+                                    .disabled(disabled),
+                            )
+                            .child(
+                                Self::toolbar_button(
+                                    "refresh-results",
+                                    "Refresh",
+                                    IconName::RefreshCw,
+                                    "Refresh results",
+                                )
+                                .disabled(disabled),
+                            )
+                            .child(
+                                Self::toolbar_button(
+                                    "filter-results",
+                                    "Filter",
+                                    IconName::ListFilter,
+                                    "Filter results",
+                                )
+                                .disabled(disabled),
+                            )
+                            .child(
+                                Self::toolbar_button(
+                                    "sort-results",
+                                    "Sort",
+                                    IconName::ArrowUpDown,
+                                    "Sort results",
+                                )
+                                .disabled(disabled),
+                            ),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child(format!("{row_count} rows  •  public.products")),
+                            .child(summary),
                     ),
             )
             .child(
@@ -268,31 +279,5 @@ impl Render for TableView {
                     .overflow_hidden()
                     .child(DataTable::new(&self.state).bordered(false).small()),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sample_results_match_column_definitions() {
-        let results = ResultsTable::sample();
-        assert_eq!(results.rows.len(), 9);
-        assert_eq!(results.columns.len(), 6);
-        assert!(
-            results
-                .rows
-                .iter()
-                .all(|row| row.len() == results.columns.len())
-        );
-        assert_eq!(results.cell(2, 2), "USB-C Dock");
-    }
-
-    #[test]
-    fn missing_cells_are_safe() {
-        let results = ResultsTable::sample();
-        assert_eq!(results.cell(usize::MAX, 0), "");
-        assert_eq!(results.cell(0, usize::MAX), "");
     }
 }

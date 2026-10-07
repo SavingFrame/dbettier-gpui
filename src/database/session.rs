@@ -169,7 +169,7 @@ impl DatabaseSession {
         query: String,
     ) -> Result<Task<Result<QueryOutput, String>>, String> {
         let DatabaseSessionState::Connected { connection, .. } = &self.state else {
-            return Err("Cannot execute query: database is not ocnnected".to_owned());
+            return Err("Cannot execute query: database is not connected".to_owned());
         };
         let connection = connection.clone();
         Ok(runtime::spawn_result(cx, "query execution", async move {

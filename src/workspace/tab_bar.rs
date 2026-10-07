@@ -6,11 +6,15 @@ use gpui_kit::component::dock::{
 };
 
 use super::{TableTarget, query_editor::QueryEditor, table_view::TableView};
-use crate::database::session::DatabaseSession;
+use crate::{
+    database::session::DatabaseSession,
+    workspace::query::{QuerySource, QueryState, TableQuery},
+};
 
 pub(crate) struct WorkspaceTab {
     title: String,
     _database_session: Entity<DatabaseSession>,
+
     dock_area: Entity<DockArea>,
 }
 
@@ -24,8 +28,10 @@ impl WorkspaceTab {
         // Each document owns its area so dragging a tool cannot detach it from its document.
         let (dock_area, _) =
             DockSkin::dock_area(format!("document-{}", cx.entity_id()), Some(1), window, cx);
-        let query_editor = cx.new(|cx| QueryEditor::new(window, cx));
-        let table_view = cx.new(|cx| TableView::new(window, cx));
+        let table_query = TableQuery::new(table.clone());
+        let query_state = cx.new(|_| QueryState::new(QuerySource::Table(table_query)));
+        let query_editor = cx.new(|cx| QueryEditor::new(window, cx, query_state.clone()));
+        let table_view = cx.new(|cx| TableView::new(window, cx, query_state.clone()));
         let center = DockLayout::tabs().panel_view(panel_handle(table_view), cx);
         let bottom = DockLayout::tabs().panel_view(panel_handle(query_editor), cx);
         dock_area.update(cx, |area, cx| {
@@ -34,6 +40,7 @@ impl WorkspaceTab {
             area.set_dock_size(DockPlacement::Bottom, px(260.), window, cx);
             area.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
         });
+        query_state.update(cx, |state, cx| state.execute(cx, session.clone()));
         Self {
             title: table.table_name,
             _database_session: session,
