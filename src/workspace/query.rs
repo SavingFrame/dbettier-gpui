@@ -109,6 +109,17 @@ impl QueryState {
         }
     }
 
+    pub(crate) fn set_sql(&mut self, sql: String) {
+        let target = match &self.query {
+            QuerySource::Sql(query) => query.target.clone(),
+            QuerySource::Table(query) => SqlTarget {
+                profile_id: query.target.profile_id.clone(),
+                schema_name: Some(query.target.schema_name.clone()),
+            },
+        };
+        self.query = QuerySource::Sql(SqlQuery { sql, target });
+    }
+
     pub(crate) fn is_loading(&self) -> bool {
         matches!(self.status, QueryStatus::Idle | QueryStatus::Running)
     }

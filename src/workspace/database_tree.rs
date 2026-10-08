@@ -155,7 +155,7 @@ impl DatabaseTree {
             RowInteraction::Select => return,
             RowInteraction::OpenTable => {
                 if let RowAction::Table(target) = action {
-                    self.on_open_table(&target, cx);
+                    self.on_open_table(Target::Table(target), cx);
                 }
                 return;
             }
@@ -170,12 +170,8 @@ impl DatabaseTree {
         self.rebuild(cx);
     }
 
-    fn on_open_table(&mut self, target: &TableTarget, cx: &mut Context<Self>) {
-        eprintln!(
-            "Open table: profile={}, schema={}, table={}",
-            target.profile_id, target.schema_name, target.table_name,
-        );
-        cx.emit(DatabaseTreeEvent::OpenTable(Target::Table(target.clone())));
+    fn on_open_table(&mut self, target: Target, cx: &mut Context<Self>) {
+        cx.emit(DatabaseTreeEvent::OpenTable(target));
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {

@@ -1,5 +1,12 @@
 use gpui::{App, MouseButton, SharedString, WeakEntity, div, prelude::*, px, svg};
-use gpui_kit::component::{ActiveTheme as _, list::ListItem, tree::TreeEntry};
+use gpui_kit::component::{
+    ActiveTheme as _,
+    list::ListItem,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+    tree::TreeEntry,
+};
+
+use crate::workspace::{Target, database_tree::SqlTarget};
 
 use super::{
     DatabaseTree,
@@ -84,6 +91,16 @@ impl<'a> DatabaseTreeRow<'a> {
         let arrow_select_id = id.clone();
         let arrow_view = self.view.clone();
         let arrow_select_view = self.view.clone();
+        let context_id = id.clone();
+        let context_view = self.view.clone();
+
+        let sql_target = row.and_then(|row| match &row.action {
+            Some(RowAction::Schema { profile_id, name }) => Some(SqlTarget {
+                profile_id: profile_id.clone(),
+                schema_name: Some(name.clone()),
+            }),
+            _ => None,
+        });
         ListItem::new(id.clone())
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 // The library tree toggles on mouse-down unless we intercept it.
@@ -107,9 +124,10 @@ impl<'a> DatabaseTreeRow<'a> {
             .text_color(color)
             .child(
                 div()
+                    .id(self.id.clone())
                     .flex()
                     .items_center()
-                    .w_full()
+                    .size_full()
                     .min_w_0()
                     .child(
                         div()
@@ -175,6 +193,26 @@ impl<'a> DatabaseTreeRow<'a> {
                                 .h(px(7.))
                                 .rounded_full()
                                 .bg(status),
+                        )
+                    })
+                    .context_menu(move |menu, window, cx| {
+                        let Some(target) = sql_target.clone() else {
+                            return menu;
+                        };
+                        if let Some(view) = context_view.upgrade() {
+                            view.update(cx, |view, cx| {
+                                view.select_row(&context_id, window, cx);
+                            });
+                        }
+                        let console_view = context_view.clone();
+                        menu.item(
+                            PopupMenuItem::new("Open console").on_click(move |_, _, cx| {
+                                if let Some(view) = console_view.upgrade() {
+                                    view.update(cx, |view, cx| {
+                                        view.on_open_table(Target::Sql(target.clone()), cx);
+                                    });
+                                }
+                            }),
                         )
                     }),
             )

@@ -14,7 +14,7 @@ use gpui_kit::{
 
 use crate::{
     database::session::DatabaseSession,
-    workspace::query::{QueryState, QueryStatus},
+    workspace::query::{QuerySource, QueryState, QueryStatus, SqlQuery},
 };
 
 pub(crate) struct QueryEditor {
@@ -118,6 +118,8 @@ impl Render for QueryEditor {
                                 let session = view.database_session.clone();
                                 view.query_state.update(cx, |query_state, cx| {
                                     if !matches!(query_state.status, QueryStatus::Running) {
+                                        query_state
+                                            .set_sql(view.editor.read(cx).value().to_string());
                                         query_state.execute(cx, session);
                                     }
                                 })
