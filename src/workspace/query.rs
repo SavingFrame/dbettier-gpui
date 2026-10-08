@@ -2,7 +2,7 @@ use gpui::{Context, Entity, Task};
 
 use crate::{
     database::{result::QueryOutput, session::DatabaseSession},
-    workspace::{TableTarget, Target, database_tree::SqlTarget},
+    workspace::{TableTarget, database_tree::SqlTarget},
 };
 
 pub(crate) struct TableQuery {
@@ -37,7 +37,8 @@ impl TableQuery {
         let schema_name = self.target.schema_name.clone();
         let from_clause = format!("\"{schema_name}\".\"{table_name}\"",);
         let limit = self.limit;
-        format!("SELECT * from {from_clause} LIMIT {limit}")
+        let offset = self.offset;
+        format!("SELECT * from {from_clause} LIMIT {limit} OFFSET {offset}")
     }
 }
 
