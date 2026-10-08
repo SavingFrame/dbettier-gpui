@@ -12,11 +12,15 @@ use gpui_kit::{
     },
 };
 
-use crate::workspace::query::QueryState;
+use crate::{
+    database::session::DatabaseSession,
+    workspace::query::{QueryState, QueryStatus},
+};
 
 pub(crate) struct QueryEditor {
     editor: Entity<EditorState>,
     query_state: Entity<QueryState>,
+    database_session: Entity<DatabaseSession>,
     _query_observation: Subscription,
 }
 
@@ -25,13 +29,15 @@ impl QueryEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
         query_state: Entity<QueryState>,
+        database_session: Entity<DatabaseSession>,
     ) -> Self {
         let query_observation =
             cx.observe_in(&query_state, window, |view, query_state, window, cx| {
                 let sql = query_state.read(cx).query.sql();
                 view.editor.update(cx, |editor, cx| {
                     editor.set_value(sql, window, cx);
-                })
+                });
+                cx.notify();
             });
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
@@ -48,6 +54,7 @@ impl QueryEditor {
         Self {
             editor,
             query_state,
+            database_session,
             _query_observation: query_observation,
         }
     }
@@ -83,6 +90,7 @@ impl Panel for QueryEditor {
 
 impl Render for QueryEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let running = matches!(self.query_state.read(cx).status, QueryStatus::Running);
         div()
             .size_full()
             .flex()
@@ -105,8 +113,15 @@ impl Render for QueryEditor {
                             .small()
                             .icon(IconName::Play)
                             .label("Run")
-                            .disabled(true)
-                            .tooltip("Query execution is not connected yet"),
+                            .disabled(running)
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                let session = view.database_session.clone();
+                                view.query_state.update(cx, |query_state, cx| {
+                                    if !matches!(query_state.status, QueryStatus::Running) {
+                                        query_state.execute(cx, session);
+                                    }
+                                })
+                            })),
                     ),
             )
             .child(

@@ -30,7 +30,8 @@ impl WorkspaceTab {
             DockSkin::dock_area(format!("document-{}", cx.entity_id()), Some(1), window, cx);
         let table_query = TableQuery::new(table.clone());
         let query_state = cx.new(|_| QueryState::new(QuerySource::Table(table_query)));
-        let query_editor = cx.new(|cx| QueryEditor::new(window, cx, query_state.clone()));
+        let query_editor =
+            cx.new(|cx| QueryEditor::new(window, cx, query_state.clone(), session.clone()));
         let table_view = cx.new(|cx| TableView::new(window, cx, query_state.clone()));
         let center = DockLayout::tabs().panel_view(panel_handle(table_view), cx);
         let bottom = DockLayout::tabs().panel_view(panel_handle(query_editor), cx);
