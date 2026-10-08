@@ -114,7 +114,7 @@ impl Render for QueryEditor {
                             .icon(IconName::Play)
                             .label("Run")
                             .disabled(running)
-                            .on_click(cx.listener(|view, _, window, cx| {
+                            .on_click(cx.listener(|view, _, _, cx| {
                                 let session = view.database_session.clone();
                                 view.query_state.update(cx, |query_state, cx| {
                                     if !matches!(query_state.status, QueryStatus::Running) {

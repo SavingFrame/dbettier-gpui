@@ -8,7 +8,8 @@ use gpui_kit::component::{
     table::{Column, DataTable, TableDelegate, TableState},
 };
 
-use crate::workspace::query::QueryState;
+use crate::database::session::DatabaseSession;
+use crate::workspace::query::{QueryState, QueryStatus};
 
 struct ResultsTable {
     query_state: Entity<QueryState>,
@@ -117,6 +118,7 @@ impl TableDelegate for ResultsTable {
 pub(crate) struct TableView {
     state: Entity<TableState<ResultsTable>>,
     query_state: Entity<QueryState>,
+    session: Entity<DatabaseSession>,
     _query_observation: Subscription,
 }
 
@@ -125,6 +127,7 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
         query_state: Entity<QueryState>,
+        session: Entity<DatabaseSession>,
     ) -> Self {
         let state = cx.new(|cx| {
             TableState::new(ResultsTable::new(query_state.clone()), window, cx)
@@ -141,6 +144,7 @@ impl TableView {
         Self {
             state,
             query_state,
+            session,
             _query_observation: query_observation,
         }
     }
@@ -237,7 +241,17 @@ impl Render for TableView {
                                     IconName::RefreshCw,
                                     "Refresh results",
                                 )
-                                .disabled(disabled),
+                                .disabled(disabled)
+                                .on_click(cx.listener(
+                                    |view, _, _, cx| {
+                                        let session = view.session.clone();
+                                        view.query_state.update(cx, |query_state, cx| {
+                                            if !matches!(query_state.status, QueryStatus::Running) {
+                                                query_state.execute(cx, session);
+                                            }
+                                        })
+                                    },
+                                )),
                             )
                             .child(
                                 Self::toolbar_button(
