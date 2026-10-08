@@ -2,14 +2,16 @@ use futures::TryStreamExt;
 use std::{collections::HashMap, time::Instant};
 
 use sqlx::{
-    Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo,
-    postgres::PgConnection, query,
+    Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo, ValueRef,
+    postgres::{PgConnection, PgRow},
+    query,
+    types::chrono::{DateTime, Utc},
 };
 
 use crate::database::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
     TableIndex,
-    result::{QueryOutput, ResultColumn},
+    result::{CellValue, QueryOutput, ResultColumn},
 };
 
 #[derive(Clone)]
@@ -197,6 +199,7 @@ impl PostgresDriver {
 
         let sql = sqlx::AssertSqlSafe(query).into_sql_str();
         let mut stream = sqlx::raw_sql(sql.clone()).fetch_many(&self.pool);
+        let mut columns = None;
 
         let mut rows = Vec::new();
         let mut rows_affected = 0;
@@ -204,18 +207,22 @@ impl PostgresDriver {
         while let Some(result) = stream.try_next().await? {
             match result {
                 Either::Left(result) => rows_affected += result.rows_affected(),
-                Either::Right(row) => rows.push(row),
+                Either::Right(row) => {
+                    columns.get_or_insert_with(|| {
+                        row.columns()
+                            .iter()
+                            .map(|column| ResultColumn {
+                                name: column.name().to_owned(),
+                                column_type: column.type_info().name().to_owned(),
+                            })
+                            .collect()
+                    });
+                    rows.push(decode_row(row)?);
+                }
             }
         }
-        let columns = match rows.first() {
-            Some(row) => row
-                .columns()
-                .iter()
-                .map(|column| ResultColumn {
-                    name: column.name().to_owned(),
-                    column_type: column.type_info().name().to_owned(),
-                })
-                .collect(),
+        let columns = match columns {
+            Some(columns) => columns,
             None => {
                 let description = self.pool.describe(sql).await?;
                 description
@@ -244,4 +251,45 @@ impl PostgresDriver {
     pub async fn close(&self) {
         self.pool.close().await;
     }
+}
+fn decode_cell(row: &PgRow, index: usize) -> Result<CellValue, sqlx::Error> {
+    let value = row.try_get_raw(index)?;
+
+    if value.is_null() {
+        return Ok(CellValue::Null);
+    }
+
+    let cell = match value.type_info().name() {
+        "BOOL" => CellValue::Boolean(row.try_get(index)?),
+        "INT2" => CellValue::Integer(i64::from(row.try_get::<i16, _>(index)?)),
+        "INT4" => CellValue::Integer(i64::from(row.try_get::<i32, _>(index)?)),
+        "INT8" => CellValue::Integer(row.try_get(index)?),
+        "FLOAT4" => CellValue::Float(f64::from(row.try_get::<f32, _>(index)?)),
+        "FLOAT8" => CellValue::Float(row.try_get(index)?),
+        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => CellValue::Text(row.try_get(index)?),
+        "BYTEA" => CellValue::Bytes(row.try_get(index)?),
+        "UUID" => CellValue::Uuid(row.try_get::<uuid::Uuid, _>(index)?),
+        "JSONB" | "JSON" => CellValue::Json(row.try_get(index)?),
+        "TIMESTAMPTZ" => {
+            let timestamp = row.try_get::<DateTime<Utc>, _>(index)?;
+            CellValue::Timestamp(timestamp.to_string())
+        }
+        type_name => {
+            return Err(sqlx::Error::Decode(
+                std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    format!("Unsupported PostgreSQL type: {type_name}"),
+                )
+                .into(),
+            ));
+        }
+    };
+
+    Ok(cell)
+}
+
+fn decode_row(row: PgRow) -> Result<Vec<CellValue>, sqlx::Error> {
+    (0..row.len())
+        .map(|index| decode_cell(&row, index))
+        .collect()
 }

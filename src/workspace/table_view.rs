@@ -7,7 +7,6 @@ use gpui_kit::component::{
     spinner::Spinner,
     table::{Column, DataTable, TableDelegate, TableState},
 };
-use sqlx::Row;
 
 use crate::workspace::query::QueryState;
 
@@ -97,20 +96,15 @@ impl TableDelegate for ResultsTable {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        let text = match self
+        let text = self
             .query_state
             .read(cx)
             .results
             .as_ref()
             .and_then(|output| output.rows.get(row_index))
-        {
-            Some(row) => match row.try_get::<Option<String>, _>(column_index) {
-                Ok(Some(value)) => value,
-                Ok(None) => "NULL".to_owned(),
-                Err(error) => format!("decode error: {error}"),
-            },
-            None => "Missing row".to_owned(),
-        };
+            .and_then(|row| row.get(column_index))
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Missing cell".to_owned());
         div()
             .w_full()
             .min_w_0()

@@ -1,4 +1,6 @@
-use gpui::{App, Context, Entity, FocusHandle, Focusable, Window, div, prelude::*, px};
+use gpui::{
+    App, Context, Entity, FocusHandle, Focusable, Subscription, Window, div, prelude::*, px,
+};
 
 use gpui_kit::{
     assets::IconName,
@@ -15,6 +17,7 @@ use crate::workspace::query::QueryState;
 pub(crate) struct QueryEditor {
     editor: Entity<EditorState>,
     query_state: Entity<QueryState>,
+    _query_observation: Subscription,
 }
 
 impl QueryEditor {
@@ -23,6 +26,13 @@ impl QueryEditor {
         cx: &mut Context<Self>,
         query_state: Entity<QueryState>,
     ) -> Self {
+        let query_observation =
+            cx.observe_in(&query_state, window, |view, query_state, window, cx| {
+                let sql = query_state.read(cx).query.sql();
+                view.editor.update(cx, |editor, cx| {
+                    editor.set_value(sql, window, cx);
+                })
+            });
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("sql")
@@ -33,11 +43,12 @@ impl QueryEditor {
                     hard_tabs: false,
                 })
                 .searchable(true)
-                .default_value("SELECT id, name, category, price, updated_at from products;")
+                .default_value(query_state.read(cx).query.sql())
         });
         Self {
             editor,
             query_state,
+            _query_observation: query_observation,
         }
     }
 }

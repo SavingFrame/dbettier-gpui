@@ -48,7 +48,7 @@ pub(crate) enum QuerySource {
 }
 
 impl QuerySource {
-    fn sql(&self) -> String {
+    pub(crate) fn sql(&self) -> String {
         match self {
             Self::Sql { sql } => sql.clone(),
             Self::Table(query) => query.sql(),
