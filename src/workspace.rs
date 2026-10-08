@@ -17,9 +17,12 @@ use self::{
     status_bar::StatusBar,
     tab_bar::WorkspaceTab,
 };
-use crate::database::{
-    profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
-    session_store::DatabaseSessionStore,
+use crate::{
+    database::{
+        profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
+        session_store::DatabaseSessionStore,
+    },
+    workspace::{database_tree::Target, query::QuerySource},
 };
 
 struct ConnectionErrorNotification;
@@ -90,8 +93,8 @@ impl Workspace {
         }
     }
 
-    fn open_table(&mut self, table: &TableTarget, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(profile) = self.profile_store.read(cx).get(&table.profile_id) else {
+    fn open_table(&mut self, target: &Target, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.profile_store.read(cx).get(&target.profile_id()) else {
             window.push_notification(
                 Notification::error("The connection profile no longer exists"),
                 cx,
@@ -101,7 +104,7 @@ impl Workspace {
         let session = self
             .session_store
             .update(cx, |store, cx| store.connect(profile, cx));
-        let document = cx.new(|cx| WorkspaceTab::new(table.clone(), session, window, cx));
+        let document = cx.new(|cx| WorkspaceTab::new(target.clone(), session, window, cx));
         let document = panel_handle(document);
         self.dock_area.update(cx, |area, cx| {
             area.add_panel_view(document, DockPlacement::Center, None, window, cx);

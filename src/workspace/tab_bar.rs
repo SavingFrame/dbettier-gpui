@@ -8,7 +8,10 @@ use gpui_kit::component::dock::{
 use super::{TableTarget, query_editor::QueryEditor, table_view::TableView};
 use crate::{
     database::session::DatabaseSession,
-    workspace::query::{QuerySource, QueryState, TableQuery},
+    workspace::{
+        Target,
+        query::{QuerySource, QueryState, TableQuery},
+    },
 };
 
 pub(crate) struct WorkspaceTab {
@@ -20,7 +23,7 @@ pub(crate) struct WorkspaceTab {
 
 impl WorkspaceTab {
     pub(crate) fn new(
-        table: TableTarget,
+        target: Target,
         session: Entity<DatabaseSession>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -28,8 +31,14 @@ impl WorkspaceTab {
         // Each document owns its area so dragging a tool cannot detach it from its document.
         let (dock_area, _) =
             DockSkin::dock_area(format!("document-{}", cx.entity_id()), Some(1), window, cx);
-        let table_query = TableQuery::new(table.clone());
-        let query_state = cx.new(|_| QueryState::new(QuerySource::Table(table_query)));
+        let query_state = cx.new(|_| match target.clone() {
+            Target::Table(table_target) => QueryState::from_table_target(table_target),
+            Target::Sql(sql_target) => QueryState::from_sql_target("".to_string(), sql_target),
+        });
+        let title = match target {
+            Target::Table(t) => t.table_name,
+            Target::Sql(_) => "hello".to_string(),
+        };
         let query_editor =
             cx.new(|cx| QueryEditor::new(window, cx, query_state.clone(), session.clone()));
         let table_view =
@@ -44,7 +53,7 @@ impl WorkspaceTab {
         });
         query_state.update(cx, |state, cx| state.execute(cx, session.clone()));
         Self {
-            title: table.table_name,
+            title: title,
             _database_session: session,
             dock_area,
         }

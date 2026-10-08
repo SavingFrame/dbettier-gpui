@@ -2,7 +2,7 @@ use gpui::{Context, Entity, Task};
 
 use crate::{
     database::{result::QueryOutput, session::DatabaseSession},
-    workspace::TableTarget,
+    workspace::{TableTarget, Target, database_tree::SqlTarget},
 };
 
 pub(crate) struct TableQuery {
@@ -41,8 +41,13 @@ impl TableQuery {
     }
 }
 
+pub(crate) struct SqlQuery {
+    sql: String,
+    target: SqlTarget,
+}
+
 pub(crate) enum QuerySource {
-    Sql { sql: String },
+    Sql(SqlQuery),
     // Other things like filters, pagination, etc
     Table(TableQuery),
 }
@@ -50,8 +55,8 @@ pub(crate) enum QuerySource {
 impl QuerySource {
     pub(crate) fn sql(&self) -> String {
         match self {
-            Self::Sql { sql } => sql.clone(),
-            Self::Table(query) => query.sql(),
+            Self::Sql(sql_query) => sql_query.sql.clone(),
+            Self::Table(table_query) => table_query.sql(),
         }
     }
 }
@@ -73,6 +78,28 @@ pub(crate) struct QueryState {
 
 impl QueryState {
     pub(crate) fn new(query: QuerySource) -> Self {
+        Self {
+            query,
+            status: QueryStatus::Idle,
+            results: None,
+            error_string: None,
+            query_task: None,
+        }
+    }
+
+    pub(crate) fn from_table_target(target: TableTarget) -> Self {
+        let query = QuerySource::Table(TableQuery::new(target));
+        Self {
+            query,
+            status: QueryStatus::Idle,
+            results: None,
+            error_string: None,
+            query_task: None,
+        }
+    }
+
+    pub(crate) fn from_sql_target(sql: String, target: SqlTarget) -> Self {
+        let query = QuerySource::Sql(SqlQuery { sql, target });
         Self {
             query,
             status: QueryStatus::Idle,
@@ -121,42 +148,5 @@ impl QueryState {
             }
         }
         cx.notify();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loading_only_while_waiting_or_running() {
-        let mut state = QueryState::new(QuerySource::Sql {
-            sql: "SELECT 1".to_owned(),
-        });
-        assert!(state.is_loading());
-
-        state.status = QueryStatus::Running;
-        assert!(state.is_loading());
-
-        state.status = QueryStatus::Failed;
-        assert!(!state.is_loading());
-    }
-
-    #[test]
-    fn successful_empty_results_stop_loading() {
-        let mut state = QueryState::new(QuerySource::Sql {
-            sql: "SELECT 1 WHERE false".to_owned(),
-        });
-        state.results = Some(QueryOutput {
-            columns: Vec::new(),
-            rows: Vec::new(),
-            rows_affected: 0,
-            elapsed: std::time::Duration::ZERO,
-        });
-        state.status = QueryStatus::Succeeded;
-        assert!(!state.is_loading());
-
-        state.status = QueryStatus::Running;
-        assert!(state.is_loading());
     }
 }

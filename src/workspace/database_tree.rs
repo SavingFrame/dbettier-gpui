@@ -22,7 +22,9 @@ use crate::database::{profile_store::DatabaseProfileStore, session_store::Databa
 use model::{RowAction, RowInfo, TableSection, TreeBuilder};
 use row::{DatabaseTreeRow, RowInteraction};
 
+pub(super) use model::SqlTarget;
 pub(super) use model::TableTarget;
+pub(super) use model::Target;
 
 pub(crate) struct DatabaseTree {
     focus_handle: gpui::FocusHandle,
@@ -38,7 +40,7 @@ pub(crate) struct DatabaseTree {
 }
 
 pub(super) enum DatabaseTreeEvent {
-    OpenTable(TableTarget),
+    OpenTable(Target),
 }
 
 impl EventEmitter<DatabaseTreeEvent> for DatabaseTree {}
@@ -173,7 +175,7 @@ impl DatabaseTree {
             "Open table: profile={}, schema={}, table={}",
             target.profile_id, target.schema_name, target.table_name,
         );
-        cx.emit(DatabaseTreeEvent::OpenTable(target.clone()));
+        cx.emit(DatabaseTreeEvent::OpenTable(Target::Table(target.clone())));
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {

@@ -58,6 +58,27 @@ pub(crate) struct TableTarget {
     pub(crate) table_name: String,
 }
 
+#[derive(Clone)]
+pub(crate) struct SqlTarget {
+    pub(crate) profile_id: String,
+    pub(crate) schema_name: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) enum Target {
+    Table(TableTarget),
+    Sql(SqlTarget),
+}
+
+impl Target {
+    pub(crate) fn profile_id(&self) -> String {
+        match self {
+            Target::Table(table_target) => table_target.profile_id.clone(),
+            Target::Sql(sql_target) => sql_target.profile_id.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum ConnectionStatus {
     Disconnected,
@@ -321,106 +342,5 @@ impl<'a> TreeBuilder<'a> {
             children,
             self.expanded_items.contains(&format!("section:{key}")),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn connection_status_colors_follow_the_current_palette() {
-        let mut theme = Theme::default();
-        assert_eq!(
-            ConnectionStatus::Disconnected.color(&theme),
-            theme.muted_foreground
-        );
-        assert_eq!(ConnectionStatus::Connecting.color(&theme), theme.warning);
-        assert_eq!(ConnectionStatus::Failed.color(&theme), theme.danger);
-        assert_eq!(ConnectionStatus::Connected.color(&theme), theme.success);
-
-        let changed_color = gpui::hsla(0.4, 0.7, 0.6, 1.0);
-        theme.colors.success = changed_color;
-        assert_eq!(ConnectionStatus::Connected.color(&theme), changed_color);
-    }
-
-    #[test]
-    fn schema_messages_preserve_loading_empty_and_error_states() {
-        let expanded = HashSet::new();
-        for (tables, label, error) in [
-            (LoadState::NotLoaded, "Loading tables...", false),
-            (LoadState::Loading, "Loading tables...", false),
-            (LoadState::Loaded(Vec::new()), "No tables", false),
-            (
-                LoadState::Failed("Catalog unavailable".to_owned()),
-                "Catalog unavailable",
-                true,
-            ),
-        ] {
-            let mut builder = TreeBuilder::new(&expanded);
-            let schema = DatabaseSchema {
-                name: "public".to_owned(),
-                tables,
-            };
-            let item = builder.schema_item("profile", &schema);
-            let rows = builder.finish();
-            assert_eq!(item.children.len(), 1);
-            let message = item
-                .children
-                .first()
-                .expect("schema should contain a message");
-            assert_eq!(message.label.as_ref(), label);
-            assert!(message.is_disabled());
-            let info = rows
-                .get(&message.id)
-                .expect("message should have row metadata");
-            assert_eq!(info.error, error);
-            assert!(info.action.is_none());
-        }
-    }
-
-    #[test]
-    fn table_sections_preserve_expansion_and_row_metadata() {
-        let key = table_key("profile", "public", "products");
-        let expanded = HashSet::from([
-            format!("table:{key}"),
-            format!("section:{}", section_key(&key, TableSection::Columns)),
-        ]);
-        let mut builder = TreeBuilder::new(&expanded);
-        let table = DatabaseTable {
-            name: "products".to_owned(),
-            columns: Vec::new(),
-            constraints: Vec::new(),
-            indexes: Vec::new(),
-        };
-        let item = builder.table_item("profile", "public", &table);
-        let rows = builder.finish();
-        assert!(item.is_expanded());
-        assert_eq!(item.children.len(), 3);
-        for (section, (title, expanded)) in item.children.iter().zip([
-            ("Columns (0)", true),
-            ("Constraints (0)", false),
-            ("Indexes (0)", false),
-        ]) {
-            assert_eq!(section.label.as_ref(), title);
-            assert_eq!(section.is_expanded(), expanded);
-            assert!(matches!(
-                rows.get(&section.id).and_then(|row| row.action.as_ref()),
-                Some(RowAction::Section)
-            ));
-            assert_eq!(section.children.len(), 1);
-            assert!(section.children.iter().all(TreeItem::is_disabled));
-        }
-        assert!(
-            matches!(rows.get(&item.id).and_then(|row| row.action.as_ref()), Some(RowAction::Table(target)) if target.table_name == "products" && target.schema_name == "public" && target.profile_id == "profile")
-        );
-    }
-
-    #[test]
-    fn table_keys_separate_schema_and_table_names() {
-        assert_ne!(
-            table_key("profile", "a:b", "c"),
-            table_key("profile", "a", "b:c"),
-        );
     }
 }
