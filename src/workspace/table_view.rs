@@ -9,7 +9,7 @@ use gpui_kit::component::{
 };
 
 use crate::database::session::DatabaseSession;
-use crate::workspace::query::{QueryState, QueryStatus};
+use crate::workspace::query::{QuerySource, QueryState, QueryStatus};
 
 struct ResultsTable {
     query_state: Entity<QueryState>,
@@ -27,7 +27,7 @@ impl TableDelegate for ResultsTable {
             .read(cx)
             .results
             .as_ref()
-            .map_or(0, |output| output.columns.len())
+            .map_or(0, |output| output.columns.len() + 1)
     }
 
     fn rows_count(&self, cx: &App) -> usize {
@@ -39,6 +39,16 @@ impl TableDelegate for ResultsTable {
     }
 
     fn column(&self, column_index: usize, cx: &App) -> Column {
+        let Some(column_index) = column_index.checked_sub(1) else {
+            return Column::new("row-number", "#")
+                .width(60.)
+                .fixed_left()
+                .selectable(false)
+                .resizable(false)
+                .movable(false)
+                .text_right();
+        };
+
         self.query_state
             .read(cx)
             .results
@@ -97,6 +107,16 @@ impl TableDelegate for ResultsTable {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
+        let Some(column_index) = column_index.checked_sub(1) else {
+            return div()
+                .w_full()
+                .min_w_0()
+                .truncate()
+                .text_right()
+                .text_color(cx.theme().muted_foreground)
+                .child((row_index + 1).to_string());
+        };
+
         let text = self
             .query_state
             .read(cx)
@@ -149,6 +169,94 @@ impl TableView {
         }
     }
 
+    fn pagination_toolbar(&self, disabled: bool, cx: &mut Context<Self>) -> gpui::Div {
+        let navigation_button = |id, icon, tooltip, disabled| {
+            Button::new(id)
+                .ghost()
+                .small()
+                .icon(icon)
+                .tooltip(tooltip)
+                .disabled(disabled)
+        };
+        let query_state = self.query_state.read(cx);
+        let limit = query_state.page_size();
+        let offset = query_state.offset();
+        let rows_to = offset as usize + limit;
+        let mut page_number = format!("{}-{}", offset + 1, rows_to);
+        let offset_label = format!("{limit} rows");
+        let has_next_page = query_state.has_next_page();
+        if has_next_page {
+            page_number.push('+');
+        }
+
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1()
+            .ml_2()
+            .pl_2()
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .child(navigation_button(
+                "first-results-page",
+                IconName::ChevronsLeft,
+                "First page",
+                true,
+            ))
+            .child(
+                navigation_button(
+                    "previous-results-page",
+                    IconName::ChevronLeft,
+                    "Previous page",
+                    !query_state.has_previous_page(),
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        query_state.previous_page(cx, session);
+                    })
+                })),
+            )
+            .child(
+                Button::new("results-page-indicator")
+                    .ghost()
+                    .small()
+                    .label(page_number)
+                    .tooltip("Page details")
+                    .disabled(disabled),
+            )
+            .child(
+                navigation_button(
+                    "next-results-page",
+                    IconName::ChevronRight,
+                    "Next page",
+                    !has_next_page,
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        query_state.next_page(cx, session);
+                    })
+                })),
+            )
+            .child(navigation_button(
+                "last-results-page",
+                IconName::ChevronsRight,
+                "Last page",
+                disabled,
+            ))
+            .child(
+                Button::new("results-page-size")
+                    .ghost()
+                    .small()
+                    .label(offset_label)
+                    .dropdown_caret(true)
+                    .tooltip("Rows per page")
+                    .disabled(disabled),
+            )
+    }
+
     fn toolbar_button(
         id: &'static str,
         label: &'static str,
@@ -194,7 +302,6 @@ impl Panel for TableView {
 
 impl Render for TableView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
         let query_state = self.query_state.read(cx);
         let loading = query_state.is_loading();
         let disabled = loading || query_state.results.is_none();
@@ -206,6 +313,8 @@ impl Render for TableView {
         } else {
             format!("{row_count} rows")
         };
+        let pagination = self.pagination_toolbar(disabled, cx);
+        let theme = cx.theme();
 
         div()
             .size_full()
@@ -270,7 +379,8 @@ impl Render for TableView {
                                     "Sort results",
                                 )
                                 .disabled(disabled),
-                            ),
+                            )
+                            .child(pagination),
                     )
                     .child(
                         div()
