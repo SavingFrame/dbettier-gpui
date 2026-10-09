@@ -169,7 +169,7 @@ impl<'a> DatabaseTreeRow<'a> {
                     .when_some(icon, |row, icon| {
                         row.child(
                             svg()
-                                .path(icon)
+                                .path(icon.path())
                                 .size_4()
                                 .flex_none()
                                 .mr_2()

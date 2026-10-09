@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use gpui::{Hsla, SharedString};
-use gpui_kit::component::{Theme, tree::TreeItem};
+use gpui_kit::{
+    assets::IconName,
+    component::{Theme, tree::TreeItem},
+};
 
 use crate::database::{
     DatabaseConnectionProfile, DatabaseSchema, DatabaseTable, LoadState,
@@ -34,11 +37,11 @@ impl TableSection {
         }
     }
 
-    pub(super) fn icon(self) -> &'static str {
+    pub(super) fn icon(self) -> IconName {
         match self {
-            Self::Columns => "icons/column.svg",
-            Self::Constraints => "icons/key.svg",
-            Self::Indexes => "icons/index.svg",
+            Self::Columns => IconName::Columns3,
+            Self::Constraints => IconName::KeyRound,
+            Self::Indexes => IconName::ListOrdered,
         }
     }
 }
@@ -100,7 +103,7 @@ impl ConnectionStatus {
 
 pub(super) struct RowInfo {
     pub(super) action: Option<RowAction>,
-    pub(super) icon: Option<&'static str>,
+    pub(super) icon: Option<IconName>,
     pub(super) status: Option<ConnectionStatus>,
     pub(super) error: bool,
 }
@@ -108,7 +111,7 @@ pub(super) struct RowInfo {
 impl RowInfo {
     pub(super) fn folder(
         action: RowAction,
-        icon: Option<&'static str>,
+        icon: Option<IconName>,
         status: Option<ConnectionStatus>,
     ) -> Self {
         Self {
@@ -119,7 +122,7 @@ impl RowInfo {
         }
     }
 
-    pub(super) fn leaf(icon: Option<&'static str>, error: bool) -> Self {
+    pub(super) fn leaf(icon: Option<IconName>, error: bool) -> Self {
         Self {
             action: None,
             icon,
@@ -224,7 +227,7 @@ impl<'a> TreeBuilder<'a> {
             profile.name.clone(),
             RowInfo::folder(
                 RowAction::Profile(profile.clone()),
-                Some("icons/database.svg"),
+                Some(IconName::Database),
                 Some(status),
             ),
             children,
@@ -257,7 +260,7 @@ impl<'a> TreeBuilder<'a> {
                     profile_id: profile_id.to_owned(),
                     name: schema.name.clone(),
                 },
-                Some("icons/schema.svg"),
+                Some(IconName::Network),
                 None,
             ),
             children,
@@ -301,7 +304,7 @@ impl<'a> TreeBuilder<'a> {
                     schema_name: schema_name.to_owned(),
                     table_name: table.name.clone(),
                 }),
-                Some("icons/table.svg"),
+                Some(IconName::Table2),
                 None,
             ),
             sections,

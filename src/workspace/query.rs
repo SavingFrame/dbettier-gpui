@@ -1,7 +1,10 @@
-use gpui::{Context, Entity, Task};
+use gpui::{Context, Entity, Task, component::table};
 
 use crate::{
-    database::{result::QueryOutput, session::DatabaseSession},
+    database::{
+        result::{CellValue, QueryOutput},
+        session::DatabaseSession,
+    },
     workspace::{TableTarget, database_tree::SqlTarget},
 };
 
@@ -48,6 +51,13 @@ impl TableQuery {
         let offset = self.offset;
         format!("SELECT * from {from_clause} LIMIT {limit} OFFSET {offset}")
     }
+
+    fn total_rows_sql(&self) -> String {
+        let table_name = self.target.table_name.clone();
+        let schema_name = self.target.schema_name.clone();
+        let from_clause = format!("\"{schema_name}\".\"{table_name}\"",);
+        format!("SELECT COUNT(1) from {from_clause}")
+    }
 }
 
 pub(crate) struct SqlQuery {
@@ -81,8 +91,10 @@ pub(crate) struct QueryState {
     pub(crate) query: QuerySource,
     pub(crate) results: Option<QueryOutput>,
     pub(crate) has_next: Option<bool>,
+    pub(crate) total_rows: Option<usize>,
     pub(crate) error_string: Option<String>,
     pub(crate) query_task: Option<Task<()>>,
+    pub(crate) total_rows_task: Option<Task<()>>,
     pub(crate) status: QueryStatus,
 }
 
@@ -91,6 +103,8 @@ impl QueryState {
         Self {
             query,
             status: QueryStatus::Idle,
+            total_rows: None,
+            total_rows_task: None,
             results: None,
             has_next: None,
             error_string: None,
@@ -104,6 +118,8 @@ impl QueryState {
             query,
             status: QueryStatus::Idle,
             has_next: None,
+            total_rows: None,
+            total_rows_task: None,
             results: None,
             error_string: None,
             query_task: None,
@@ -116,6 +132,8 @@ impl QueryState {
             query,
             status: QueryStatus::Idle,
             results: None,
+            total_rows: None,
+            total_rows_task: None,
             has_next: None,
             error_string: None,
             query_task: None,
@@ -194,6 +212,81 @@ impl QueryState {
         matches!(self.status, QueryStatus::Idle | QueryStatus::Running)
     }
 
+    pub(crate) fn first_page(&mut self, cx: &mut Context<Self>, session: Entity<DatabaseSession>) {
+        if self.is_loading() || !self.has_previous_page() {
+            return;
+        }
+        let QuerySource::Table(query) = &mut self.query else {
+            return;
+        };
+        query.set_offset(0);
+        self.execute(cx, session);
+    }
+
+    pub(crate) fn fetch_total_rows(
+        &mut self,
+        cx: &mut Context<Self>,
+        session: Entity<DatabaseSession>,
+    ) {
+        match &self.query {
+            QuerySource::Sql(_) => {
+                self.total_rows = Some(
+                    self.results
+                        .as_ref()
+                        .map_or(0, |results| results.rows.len()),
+                )
+            }
+            QuerySource::Table(table_query) => {
+                self.total_rows_task = None;
+                self.total_rows = None;
+                let sql = table_query.total_rows_sql();
+                let task = session.update(cx, |session, cx| session.execute_query(cx, sql));
+                match task {
+                    Ok(task) => {
+                        self.total_rows_task = Some(cx.spawn(async move |state, cx| {
+                            let result = task.await;
+                            if let Err(error) = state.update(cx, |state, cx| {
+                                match result {
+                                    Ok(output) => {
+                                        let count = output.rows.first().and_then(|row| row.first());
+                                        match count {
+                                            Some(CellValue::Integer(value)) => {
+                                                match usize::try_from(*value) {
+                                                    Ok(total) => state.total_rows = Some(total),
+                                                    Err(error) => {
+                                                        state.error_string = Some(format!(
+                                                            "Invalid row count: {error}"
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                state.error_string = Some(
+                                                    "Count query returned non integer value"
+                                                        .to_owned(),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Err(error) => {
+                                        eprintln!("failed to execute query: {error}");
+                                    }
+                                }
+                                cx.notify();
+                            }) {
+                                eprintln!("failed to update query state: {error}");
+                            }
+                        }));
+                    }
+                    Err(error) => {
+                        eprintln!("failed to do something: {error}");
+                    }
+                }
+                cx.notify();
+            }
+        };
+    }
+
     pub(crate) fn execute(&mut self, cx: &mut Context<Self>, session: Entity<DatabaseSession>) {
         self.query_task = None;
         self.error_string = None;
@@ -204,7 +297,6 @@ impl QueryState {
             Ok(task) => {
                 self.query_task = Some(cx.spawn(async move |state, cx| {
                     let result = task.await;
-
                     if let Err(error) = state.update(cx, |state, cx| {
                         match result {
                             Ok(mut output) => {
@@ -221,14 +313,14 @@ impl QueryState {
                                 state.status = QueryStatus::Succeeded;
                             }
                             Err(error) => {
-                                state.error_string = Some(error.clone());
+                                eprintln!("failed to execute query: {error}");
+                                state.error_string = Some(error);
                                 state.status = QueryStatus::Failed;
-                                eprintln!("failed to execute query. Error: {error} ")
                             }
                         }
                         cx.notify();
                     }) {
-                        eprint!("failed to update query state: {error}")
+                        eprintln!("failed to update query state: {error}");
                     }
                 }));
             }

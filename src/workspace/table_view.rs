@@ -182,12 +182,12 @@ impl TableView {
         let limit = query_state.page_size();
         let offset = query_state.offset();
         let rows_to = offset as usize + limit;
-        let mut page_number = format!("{}-{}", offset + 1, rows_to);
-        let offset_label = format!("{limit} rows");
+        let page_number = format!("{}-{}", offset + 1, rows_to);
+        let total_label = query_state
+            .total_rows
+            .map_or_else(|| "of ?".to_owned(), |total| format!("of {total}"));
         let has_next_page = query_state.has_next_page();
-        if has_next_page {
-            page_number.push('+');
-        }
+        let has_previous_page = query_state.has_previous_page();
 
         div()
             .flex_none()
@@ -195,21 +195,32 @@ impl TableView {
             .items_center()
             .gap_1()
             .ml_2()
-            .pl_2()
-            .border_l_1()
+            .px_1()
+            .h(px(32.))
+            .rounded_md()
+            .border_1()
             .border_color(cx.theme().border)
-            .child(navigation_button(
-                "first-results-page",
-                IconName::ChevronsLeft,
-                "First page",
-                true,
-            ))
+            .bg(cx.theme().secondary)
+            .child(
+                navigation_button(
+                    "first-results-page",
+                    IconName::SkipBack,
+                    "First page",
+                    !has_previous_page,
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        query_state.first_page(cx, session);
+                    })
+                })),
+            )
             .child(
                 navigation_button(
                     "previous-results-page",
                     IconName::ChevronLeft,
                     "Previous page",
-                    !query_state.has_previous_page(),
+                    !has_previous_page,
                 )
                 .on_click(cx.listener(|view, _, _, cx| {
                     let session = view.session.clone();
@@ -223,8 +234,21 @@ impl TableView {
                     .ghost()
                     .small()
                     .label(page_number)
+                    .dropdown_caret(true)
                     .tooltip("Page details")
-                    .disabled(disabled),
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        let session = view.session.clone();
+                        view.query_state.update(cx, |query_state, cx| {
+                            query_state.fetch_total_rows(cx, session);
+                        })
+                    }))
+                    .disabled(!has_next_page),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(total_label),
             )
             .child(
                 navigation_button(
@@ -242,19 +266,23 @@ impl TableView {
             )
             .child(navigation_button(
                 "last-results-page",
-                IconName::ChevronsRight,
+                IconName::SkipForward,
                 "Last page",
                 disabled,
             ))
             .child(
-                Button::new("results-page-size")
-                    .ghost()
-                    .small()
-                    .label(offset_label)
-                    .dropdown_caret(true)
-                    .tooltip("Rows per page")
-                    .disabled(disabled),
+                div()
+                    .h(px(18.))
+                    .border_l_1()
+                    .border_color(cx.theme().border)
+                    .mx_1(),
             )
+            .child(navigation_button(
+                "results-pagination-options",
+                IconName::EllipsisVertical,
+                "Pagination options",
+                disabled,
+            ))
     }
 
     fn toolbar_button(
