@@ -4,7 +4,6 @@ use std::{collections::HashMap, time::Instant};
 use sqlx::{
     Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo, ValueRef,
     postgres::{PgConnection, PgRow},
-    query,
     types::chrono::{DateTime, Utc},
 };
 
