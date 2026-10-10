@@ -44,7 +44,7 @@ impl PostgresDriver {
 
     pub async fn list_tables(&self, schema_name: &str) -> Result<Vec<DatabaseTable>, sqlx::Error> {
         let rows =
-            sqlx::query("SELECT table_name FROM information_schema.tables WHERE table_schema = $1")
+            sqlx::query("SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name")
                 .bind(schema_name)
                 .fetch_all(&self.pool)
                 .await?;

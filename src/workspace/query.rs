@@ -441,6 +441,11 @@ impl QueryState {
                                     },
                                     QuerySource::Sql(_) => Some(false),
                                 };
+                                if matches!(&state.query, QuerySource::Sql(_)) {
+                                    if let Ok(count) = u64::try_from(output.rows.len()) {
+                                        state.total_rows = Some(count)
+                                    }
+                                }
                                 state.results = Some(output);
                                 state.status = QueryStatus::Succeeded;
                             }

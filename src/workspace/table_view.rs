@@ -1,5 +1,3 @@
-use std::ops::Sub;
-
 use gpui::component::table::ColumnSort;
 use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px, relative};
 use gpui_kit::assets::IconName;
