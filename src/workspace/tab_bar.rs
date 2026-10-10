@@ -5,13 +5,10 @@ use gpui_kit::component::dock::{
     BasePanel, DockArea, DockLayout, DockPlacement, DockSkin, Panel, PanelEvent, panel_handle,
 };
 
-use super::{TableTarget, query_editor::QueryEditor, table_view::TableView};
+use super::{query_editor::QueryEditor, table_view::TableView};
 use crate::{
     database::session::DatabaseSession,
-    workspace::{
-        Target,
-        query::{QuerySource, QueryState, TableQuery},
-    },
+    workspace::{Target, query::QueryState},
 };
 
 pub(crate) struct WorkspaceTab {
@@ -53,7 +50,7 @@ impl WorkspaceTab {
         });
         query_state.update(cx, |state, cx| state.execute(cx, session.clone()));
         Self {
-            title: title,
+            title,
             _database_session: session,
             dock_area,
         }

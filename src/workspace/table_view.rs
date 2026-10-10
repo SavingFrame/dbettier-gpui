@@ -1,23 +1,29 @@
+use gpui::component::table::ColumnSort;
 use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, Size,
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelEvent},
+    menu::{DropdownMenu as _, PopupMenuItem},
     spinner::Spinner,
     table::{Column, DataTable, TableDelegate, TableState},
 };
 
 use crate::database::session::DatabaseSession;
-use crate::workspace::query::{QuerySource, QueryState, QueryStatus};
+use crate::workspace::query::{QuerySource, QueryState, QueryStatus, SortDirection, SortField};
 
 struct ResultsTable {
     query_state: Entity<QueryState>,
+    session: Entity<DatabaseSession>,
 }
 
 impl ResultsTable {
-    fn new(query_state: Entity<QueryState>) -> Self {
-        Self { query_state }
+    fn new(query_state: Entity<QueryState>, session: Entity<DatabaseSession>) -> Self {
+        Self {
+            query_state,
+            session,
+        }
     }
 }
 
@@ -41,20 +47,36 @@ impl TableDelegate for ResultsTable {
     fn column(&self, column_index: usize, cx: &App) -> Column {
         let Some(column_index) = column_index.checked_sub(1) else {
             return Column::new("row-number", "#")
-                .width(60.)
+                .width(40.)
                 .fixed_left()
                 .selectable(false)
                 .resizable(false)
                 .movable(false)
                 .text_right();
         };
+        let query_state = self.query_state.read(cx);
 
-        self.query_state
-            .read(cx)
+        query_state
             .results
             .as_ref()
             .and_then(|output| output.columns.get(column_index))
-            .map(|column| Column::new(format!("column-{column_index}"), column.name.clone()))
+            .map(|column| {
+                let col = Column::new(format!("column-{column_index}"), column.name.clone());
+                let QuerySource::Table(query) = &query_state.query else {
+                    return col;
+                };
+                match query
+                    .ordering()
+                    .iter()
+                    .find(|v| v.column_name == column.name.clone())
+                {
+                    Some(sort_field) => match sort_field.direction {
+                        SortDirection::Ascending => col.ascending(),
+                        SortDirection::Descending => col.descending(),
+                    },
+                    None => col.sortable(),
+                }
+            })
             .unwrap_or_default()
     }
 
@@ -133,6 +155,50 @@ impl TableDelegate for ResultsTable {
             .text_color(cx.theme().foreground)
             .child(text)
     }
+
+    fn perform_sort(
+        &mut self,
+        col_ix: usize,
+        sort: ColumnSort,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) {
+        let Some(column_id) = col_ix.checked_sub(1) else {
+            eprintln!("Cannot substract 1 from column_id");
+            return;
+        };
+        let session = self.session.clone();
+        self.query_state.update(cx, |query_state, cx| {
+            let column = query_state
+                .results
+                .as_ref()
+                .and_then(|output| output.columns.get(column_id));
+            let Some(column) = column else {
+                return;
+            };
+            let QuerySource::Table(query) = &mut query_state.query else {
+                return;
+            };
+            match sort {
+                ColumnSort::Ascending => {
+                    query.add_ordering(SortField {
+                        column_name: column.name.clone(),
+                        direction: SortDirection::Ascending,
+                    });
+                }
+                ColumnSort::Descending => {
+                    query.add_ordering(SortField {
+                        column_name: column.name.clone(),
+                        direction: SortDirection::Descending,
+                    });
+                }
+                ColumnSort::Default => {
+                    query.remove_ordering(column.name.clone());
+                }
+            }
+            query_state.execute(cx, session);
+        })
+    }
 }
 
 pub(crate) struct TableView {
@@ -150,9 +216,13 @@ impl TableView {
         session: Entity<DatabaseSession>,
     ) -> Self {
         let state = cx.new(|cx| {
-            TableState::new(ResultsTable::new(query_state.clone()), window, cx)
-                .row_selectable(true)
-                .col_selectable(false)
+            TableState::new(
+                ResultsTable::new(query_state.clone(), session.clone()),
+                window,
+                cx,
+            )
+            .row_selectable(true)
+            .col_selectable(false)
         });
         let query_observation = cx.observe(&query_state, |view, _, cx| {
             view.state.update(cx, |state, cx| {
@@ -181,13 +251,17 @@ impl TableView {
         let query_state = self.query_state.read(cx);
         let limit = query_state.page_size();
         let offset = query_state.offset();
-        let rows_to = offset as usize + limit;
-        let page_number = format!("{}-{}", offset + 1, rows_to);
-        let total_label = query_state
+        let rows_to = query_state
             .total_rows
-            .map_or_else(|| "of ?".to_owned(), |total| format!("of {total}"));
+            .map_or(offset + limit, |total| (offset + limit).min(total));
+        let page_number = format!("{}-{}", offset + 1, rows_to);
+        let total_rows = query_state.total_rows;
+        let total_label =
+            total_rows.map_or_else(|| "of ?".to_owned(), |total| format!("of {total}"));
         let has_next_page = query_state.has_next_page();
         let has_previous_page = query_state.has_previous_page();
+
+        let view = cx.entity().downgrade();
 
         div()
             .flex_none()
@@ -235,20 +309,50 @@ impl TableView {
                     .small()
                     .label(page_number)
                     .dropdown_caret(true)
-                    .tooltip("Page details")
+                    .tooltip("Rows per page")
+                    .disabled(disabled)
+                    .dropdown_menu(move |menu, _, _| {
+                        menu.label("Rows per page")
+                            .item(
+                                PopupMenuItem::new("100")
+                                    .on_click(Self::page_size_callback(view.clone(), Some(100)))
+                                    .checked(limit == 100),
+                            )
+                            .item(
+                                PopupMenuItem::new("200")
+                                    .on_click(Self::page_size_callback(view.clone(), Some(200)))
+                                    .checked(limit == 200),
+                            )
+                            .item(
+                                PopupMenuItem::new("500")
+                                    .on_click(Self::page_size_callback(view.clone(), Some(500)))
+                                    .checked(limit == 500),
+                            )
+                            .item(
+                                PopupMenuItem::new("1000")
+                                    .on_click(Self::page_size_callback(view.clone(), Some(1000)))
+                                    .checked(limit == 1000),
+                            )
+                            .item(
+                                PopupMenuItem::new("All")
+                                    .on_click(Self::page_size_callback(view.clone(), None))
+                                    .checked(total_rows == Some(limit)),
+                            )
+                    }),
+            )
+            .child(
+                Button::new("results-total-rows")
+                    .ghost()
+                    .small()
+                    .label(total_label)
+                    .tooltip("Fetch total row count")
+                    .disabled(disabled)
                     .on_click(cx.listener(|view, _, _, cx| {
                         let session = view.session.clone();
                         view.query_state.update(cx, |query_state, cx| {
                             query_state.fetch_total_rows(cx, session);
                         })
-                    }))
-                    .disabled(!has_next_page),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(total_label),
+                    })),
             )
             .child(
                 navigation_button(
@@ -264,12 +368,20 @@ impl TableView {
                     })
                 })),
             )
-            .child(navigation_button(
-                "last-results-page",
-                IconName::SkipForward,
-                "Last page",
-                disabled,
-            ))
+            .child(
+                navigation_button(
+                    "last-results-page",
+                    IconName::SkipForward,
+                    "Last page",
+                    query_state.total_rows.is_none() | !has_next_page,
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        query_state.last_page(cx, session);
+                    })
+                })),
+            )
             .child(
                 div()
                     .h(px(18.))
@@ -297,6 +409,22 @@ impl TableView {
             .icon(icon)
             .label(label)
             .tooltip(tooltip)
+    }
+
+    fn page_size_callback(
+        view: gpui::WeakEntity<Self>,
+        page_size: Option<u64>,
+    ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
+        move |_, _, cx| {
+            if let Some(view) = view.upgrade() {
+                view.update(cx, |view, cx| {
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        query_state.set_page_size(cx, page_size, session);
+                    })
+                })
+            }
+        }
     }
 }
 

@@ -22,7 +22,7 @@ use crate::{
         profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
         session_store::DatabaseSessionStore,
     },
-    workspace::{database_tree::Target, query::QuerySource},
+    workspace::database_tree::Target,
 };
 
 struct ConnectionErrorNotification;

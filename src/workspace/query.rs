@@ -1,4 +1,4 @@
-use gpui::{Context, Entity, Task, component::table};
+use gpui::{Context, Entity, Task};
 
 use crate::{
     database::{
@@ -8,38 +8,65 @@ use crate::{
     workspace::{TableTarget, database_tree::SqlTarget},
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    fn to_sql(self) -> &'static str {
+        match self {
+            Self::Ascending => "ASC",
+            Self::Descending => "DESC",
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct SortField {
+    pub(crate) column_name: String,
+    pub(crate) direction: SortDirection,
+}
+
+impl SortField {
+    fn to_sql(&self) -> String {
+        format!("{} {}", self.column_name, self.direction.to_sql())
+    }
+}
+
 pub(crate) struct TableQuery {
     target: TableTarget,
-    limit: u32,
-    offset: u32,
-    ordering: Option<String>,
+    limit: Option<u64>,
+    offset: u64,
+    ordering: Vec<SortField>,
 }
 
 impl TableQuery {
     pub(crate) fn new(target: TableTarget) -> Self {
         Self {
             target,
-            limit: 500,
+            limit: Some(500),
             offset: 0,
-            ordering: None,
+            ordering: Vec::new(),
         }
     }
 
-    pub(crate) fn set_limit(&mut self, limit: u32) -> &mut Self {
+    pub(crate) fn set_limit(&mut self, limit: Option<u64>) -> &mut Self {
         self.limit = limit;
         self
     }
 
-    pub(crate) fn set_offset(&mut self, offset: u32) -> &mut Self {
+    pub(crate) fn set_offset(&mut self, offset: u64) -> &mut Self {
         self.offset = offset;
         self
     }
 
-    pub(crate) fn offset(&self) -> u32 {
+    pub(crate) fn offset(&self) -> u64 {
         self.offset
     }
 
-    pub(crate) fn limit(&self) -> u32 {
+    pub(crate) fn limit(&self) -> Option<u64> {
         self.limit
     }
 
@@ -47,9 +74,17 @@ impl TableQuery {
         let table_name = self.target.table_name.clone();
         let schema_name = self.target.schema_name.clone();
         let from_clause = format!("\"{schema_name}\".\"{table_name}\"",);
-        let limit = self.limit + 1;
         let offset = self.offset;
-        format!("SELECT * from {from_clause} LIMIT {limit} OFFSET {offset}")
+        let mut sql = format!("SELECT * from {from_clause}");
+        if !self.ordering.is_empty() {
+            sql.push_str(&self.build_order_query());
+        }
+        if let Some(limit) = self.limit() {
+            let limit = limit + 1;
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
+        sql.push_str(&format!(" OFFSET {offset}"));
+        sql
     }
 
     fn total_rows_sql(&self) -> String {
@@ -57,6 +92,39 @@ impl TableQuery {
         let schema_name = self.target.schema_name.clone();
         let from_clause = format!("\"{schema_name}\".\"{table_name}\"",);
         format!("SELECT COUNT(1) from {from_clause}")
+    }
+
+    fn build_order_query(&self) -> String {
+        let ordering_columns = self.ordering.iter().map(|clause| clause.to_sql());
+        format!(
+            " ORDER BY {}",
+            ordering_columns.collect::<Vec<String>>().join(", ")
+        )
+    }
+
+    pub(crate) fn add_ordering(&mut self, sort_field: SortField) {
+        if let Some(existing) = self
+            .ordering
+            .iter_mut()
+            .find(|value| value.column_name == sort_field.column_name)
+        {
+            *existing = sort_field;
+        } else {
+            self.ordering.push(sort_field);
+        }
+    }
+
+    pub(crate) fn remove_ordering(&mut self, column_name: String) {
+        if let Some(index) = self
+            .ordering
+            .iter()
+            .position(|value| value.column_name == column_name)
+        {
+            self.ordering.remove(index);
+        }
+    }
+    pub(crate) fn ordering(&self) -> Vec<SortField> {
+        self.ordering.clone()
     }
 }
 
@@ -91,7 +159,7 @@ pub(crate) struct QueryState {
     pub(crate) query: QuerySource,
     pub(crate) results: Option<QueryOutput>,
     pub(crate) has_next: Option<bool>,
-    pub(crate) total_rows: Option<usize>,
+    pub(crate) total_rows: Option<u64>,
     pub(crate) error_string: Option<String>,
     pub(crate) query_task: Option<Task<()>>,
     pub(crate) total_rows_task: Option<Task<()>>,
@@ -99,19 +167,6 @@ pub(crate) struct QueryState {
 }
 
 impl QueryState {
-    pub(crate) fn new(query: QuerySource) -> Self {
-        Self {
-            query,
-            status: QueryStatus::Idle,
-            total_rows: None,
-            total_rows_task: None,
-            results: None,
-            has_next: None,
-            error_string: None,
-            query_task: None,
-        }
-    }
-
     pub(crate) fn from_table_target(target: TableTarget) -> Self {
         let query = QuerySource::Table(TableQuery::new(target));
         Self {
@@ -151,21 +206,39 @@ impl QueryState {
         self.query = QuerySource::Sql(SqlQuery { sql, target });
     }
 
-    pub(crate) fn page_size(&self) -> usize {
+    pub(crate) fn page_size(&self) -> u64 {
         match &self.query {
-            QuerySource::Table(query) => query.limit() as usize,
+            QuerySource::Table(query) => query
+                .limit()
+                .unwrap_or_else(|| self.total_rows.unwrap_or(0)),
             QuerySource::Sql(_) => self
                 .results
                 .as_ref()
-                .map_or(0, |results| results.rows.len()),
+                .map_or(0, |results| results.rows.len() as u64),
         }
     }
 
-    pub(crate) fn offset(&self) -> u32 {
+    pub(crate) fn offset(&self) -> u64 {
         match &self.query {
             QuerySource::Table(query) => query.offset(),
             QuerySource::Sql(_) => 0,
         }
+    }
+
+    pub(crate) fn set_page_size(
+        &mut self,
+        cx: &mut Context<Self>,
+        page_size: Option<u64>,
+        session: Entity<DatabaseSession>,
+    ) {
+        if self.is_loading() {
+            return;
+        }
+        let QuerySource::Table(query) = &mut self.query else {
+            return;
+        };
+        query.set_limit(page_size);
+        self.execute(cx, session);
     }
 
     pub(crate) fn has_next_page(&self) -> bool {
@@ -183,7 +256,12 @@ impl QueryState {
         let QuerySource::Table(query) = &mut self.query else {
             return;
         };
-        let Some(next_offset) = query.offset().checked_add(query.limit()) else {
+
+        let Some(limit) = query.limit() else {
+            return;
+        };
+
+        let Some(next_offset) = query.offset().checked_add(limit) else {
             self.error_string = Some("Cannot advance page: offset overflow".to_owned());
             cx.notify();
             return;
@@ -203,7 +281,10 @@ impl QueryState {
         let QuerySource::Table(query) = &mut self.query else {
             return;
         };
-        let next_offset = query.offset().saturating_sub(query.limit());
+        let Some(limit) = query.limit() else {
+            return;
+        };
+        let next_offset = query.offset().saturating_sub(limit);
         query.set_offset(next_offset);
         self.execute(cx, session);
     }
@@ -223,6 +304,30 @@ impl QueryState {
         self.execute(cx, session);
     }
 
+    pub(crate) fn last_page(&mut self, cx: &mut Context<Self>, session: Entity<DatabaseSession>) {
+        if self.is_loading() || !self.has_next_page() {
+            return;
+        }
+        if self.total_rows.is_none() {
+            self.fetch_total_rows(cx, session);
+            return;
+        }
+        let QuerySource::Table(query) = &mut self.query else {
+            return;
+        };
+        let Some(limit) = query.limit() else {
+            return;
+        };
+        if limit == 0 {
+            return;
+        }
+        if let Some(value) = self.total_rows {
+            let offset = value.saturating_sub(1) / limit * limit;
+            query.set_offset(offset);
+            self.execute(cx, session);
+        }
+    }
+
     pub(crate) fn fetch_total_rows(
         &mut self,
         cx: &mut Context<Self>,
@@ -233,7 +338,7 @@ impl QueryState {
                 self.total_rows = Some(
                     self.results
                         .as_ref()
-                        .map_or(0, |results| results.rows.len()),
+                        .map_or(0, |results| results.rows.len() as u64),
                 )
             }
             QuerySource::Table(table_query) => {
@@ -252,7 +357,9 @@ impl QueryState {
                                         match count {
                                             Some(CellValue::Integer(value)) => {
                                                 match usize::try_from(*value) {
-                                                    Ok(total) => state.total_rows = Some(total),
+                                                    Ok(total) => {
+                                                        state.total_rows = Some(total as u64)
+                                                    }
                                                     Err(error) => {
                                                         state.error_string = Some(format!(
                                                             "Invalid row count: {error}"
@@ -301,12 +408,23 @@ impl QueryState {
                         match result {
                             Ok(mut output) => {
                                 state.has_next = match &state.query {
-                                    QuerySource::Table(table_query) => {
-                                        let limit = table_query.limit as usize;
-                                        let has_next = output.rows.len() > limit;
-                                        output.rows.truncate(limit);
-                                        Some(has_next)
-                                    }
+                                    QuerySource::Table(table_query) => match table_query.limit() {
+                                        Some(limit) => {
+                                            let Ok(limit) = usize::try_from(limit) else {
+                                                state.error_string = Some(
+                                                    "Page size exceeds platform supported size"
+                                                        .to_owned(),
+                                                );
+                                                state.status = QueryStatus::Failed;
+                                                cx.notify();
+                                                return;
+                                            };
+                                            let has_next = output.rows.len() > limit;
+                                            output.rows.truncate(limit);
+                                            Some(has_next)
+                                        }
+                                        None => Some(false),
+                                    },
                                     QuerySource::Sql(_) => Some(false),
                                 };
                                 state.results = Some(output);
