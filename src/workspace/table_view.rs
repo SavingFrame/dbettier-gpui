@@ -1,10 +1,13 @@
+use std::ops::Sub;
+
 use gpui::component::table::ColumnSort;
-use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px, relative};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, Size,
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelEvent},
+    input::{Editor, EditorState, InputEvent},
     menu::{DropdownMenu as _, PopupMenuItem},
     spinner::Spinner,
     table::{Column, DataTable, TableDelegate, TableState},
@@ -205,7 +208,11 @@ pub(crate) struct TableView {
     state: Entity<TableState<ResultsTable>>,
     query_state: Entity<QueryState>,
     session: Entity<DatabaseSession>,
+    filter_input: Entity<EditorState>,
+    ordering_input: Entity<EditorState>,
     _query_observation: Subscription,
+    _ordering_observation: Subscription,
+    _filtering_subscription: Subscription,
 }
 
 impl TableView {
@@ -223,7 +230,60 @@ impl TableView {
             )
             .row_selectable(true)
             .col_selectable(false)
+            .cell_selectable(true)
         });
+        let filter_input = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .placeholder("Filter: SQL condition")
+                .line_number(false)
+                .folding(false)
+                .soft_wrap(false)
+                .searchable(false)
+                .submit_on_enter(true)
+        });
+        let ordering_input = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .placeholder("Order by (read-only)")
+                .line_number(false)
+                .folding(false)
+                .soft_wrap(false)
+                .searchable(false)
+        });
+        let filtering_subscription = cx.subscribe_in(
+            &filter_input,
+            window,
+            |view, input, event: &InputEvent, _window, cx| {
+                if let InputEvent::PressEnter { .. } = event {
+                    let condition = input.read(cx).value().to_string();
+                    let session = view.session.clone();
+                    view.query_state.update(cx, |query_state, cx| {
+                        let QuerySource::Table(query) = &mut query_state.query else {
+                            return;
+                        };
+                        let filtering = if condition.trim().is_empty() {
+                            None
+                        } else {
+                            Some(condition)
+                        };
+                        query.set_filtering(filtering);
+                        query_state.execute(cx, session);
+                    })
+                }
+            },
+        );
+
+        let ordering_observation =
+            cx.observe_in(&query_state, window, |view, query_state, window, cx| {
+                let ordering = match &query_state.read(cx).query {
+                    QuerySource::Table(query) => query.ordering_sql(),
+                    QuerySource::Sql(_) => String::new(),
+                };
+                view.ordering_input.update(cx, |input, cx| {
+                    input.set_value(ordering, window, cx);
+                })
+            });
         let query_observation = cx.observe(&query_state, |view, _, cx| {
             view.state.update(cx, |state, cx| {
                 state.refresh(cx);
@@ -235,7 +295,11 @@ impl TableView {
             state,
             query_state,
             session,
+            filter_input,
+            ordering_input,
             _query_observation: query_observation,
+            _ordering_observation: ordering_observation,
+            _filtering_subscription: filtering_subscription,
         }
     }
 
@@ -459,6 +523,7 @@ impl Panel for TableView {
 impl Render for TableView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query_state = self.query_state.read(cx);
+        let is_table_query = matches!(&query_state.query, QuerySource::Table(_));
         let loading = query_state.is_loading();
         let disabled = loading || query_state.results.is_none();
         let row_count = self.state.read(cx).delegate().rows_count(cx);
@@ -486,12 +551,13 @@ impl Render for TableView {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .justify_between()
+                    .gap_3()
                     .px_3()
                     .border_b_1()
                     .border_color(theme.border)
                     .child(
                         div()
+                            .flex_none()
                             .flex()
                             .items_center()
                             .gap_1()
@@ -518,28 +584,42 @@ impl Render for TableView {
                                     },
                                 )),
                             )
-                            .child(
-                                Self::toolbar_button(
-                                    "filter-results",
-                                    "Filter",
-                                    IconName::ListFilter,
-                                    "Filter results",
-                                )
-                                .disabled(disabled),
-                            )
-                            .child(
-                                Self::toolbar_button(
-                                    "sort-results",
-                                    "Sort",
-                                    IconName::ArrowUpDown,
-                                    "Sort results",
-                                )
-                                .disabled(disabled),
-                            )
                             .child(pagination),
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .when(is_table_query, |toolbar| {
+                                toolbar.child(
+                                    div().flex_1().min_w_0().child(
+                                        Editor::new(&self.filter_input)
+                                            .h(px(32.))
+                                            .line_height(relative(1.))
+                                            .text_sm()
+                                            .aria_label("Filter SQL condition"),
+                                    ),
+                                )
+                            })
+                            .when(is_table_query, |toolbar| {
+                                toolbar.child(
+                                    div().flex_1().min_w_0().child(
+                                        Editor::new(&self.ordering_input)
+                                            .h(px(32.))
+                                            .line_height(relative(1.))
+                                            .text_sm()
+                                            .readonly(true)
+                                            .aria_label("Ordering SQL expression"),
+                                    ),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
                             .text_sm()
                             .text_color(theme.muted_foreground)
                             .child(summary),

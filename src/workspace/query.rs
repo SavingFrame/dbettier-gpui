@@ -40,6 +40,7 @@ pub(crate) struct TableQuery {
     limit: Option<u64>,
     offset: u64,
     ordering: Vec<SortField>,
+    filtering: Option<String>,
 }
 
 impl TableQuery {
@@ -49,6 +50,7 @@ impl TableQuery {
             limit: Some(500),
             offset: 0,
             ordering: Vec::new(),
+            filtering: None,
         }
     }
 
@@ -76,9 +78,13 @@ impl TableQuery {
         let from_clause = format!("\"{schema_name}\".\"{table_name}\"",);
         let offset = self.offset;
         let mut sql = format!("SELECT * from {from_clause}");
+        if let Some(filtration) = self.filtering.clone() {
+            sql.push_str(&format!(" WHERE {}", filtration));
+        }
         if !self.ordering.is_empty() {
             sql.push_str(&self.build_order_query());
         }
+
         if let Some(limit) = self.limit() {
             let limit = limit + 1;
             sql.push_str(&format!(" LIMIT {limit}"));
@@ -95,11 +101,19 @@ impl TableQuery {
     }
 
     fn build_order_query(&self) -> String {
-        let ordering_columns = self.ordering.iter().map(|clause| clause.to_sql());
-        format!(
-            " ORDER BY {}",
-            ordering_columns.collect::<Vec<String>>().join(", ")
-        )
+        format!(" ORDER BY {}", self.ordering_sql())
+    }
+
+    pub(crate) fn ordering_sql(&self) -> String {
+        self.ordering
+            .iter()
+            .map(|clause| clause.to_sql())
+            .collect::<Vec<String>>()
+            .join(", ")
+    }
+
+    pub(crate) fn set_filtering(&mut self, filtering: Option<String>) {
+        self.filtering = filtering;
     }
 
     pub(crate) fn add_ordering(&mut self, sort_field: SortField) {
