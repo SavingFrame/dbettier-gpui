@@ -1,8 +1,9 @@
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, Window, div, prelude::*, px,
 };
-use gpui_kit::component::dock::{
-    BasePanel, DockArea, DockLayout, DockPlacement, DockSkin, Panel, PanelEvent, panel_handle,
+use gpui_kit::component::{
+    dock::{BasePanel, Panel, PanelEvent},
+    resizable::{ResizableState, resizable_panel, v_resizable},
 };
 
 use super::{query_editor::QueryEditor, table_view::TableView};
@@ -15,7 +16,9 @@ pub(crate) struct WorkspaceTab {
     title: String,
     _database_session: Entity<DatabaseSession>,
 
-    dock_area: Entity<DockArea>,
+    query_editor: Entity<QueryEditor>,
+    table_view: Entity<TableView>,
+    layout_state: Entity<ResizableState>,
 }
 
 impl WorkspaceTab {
@@ -25,9 +28,6 @@ impl WorkspaceTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Each document owns its area so dragging a tool cannot detach it from its document.
-        let (dock_area, _) =
-            DockSkin::dock_area(format!("document-{}", cx.entity_id()), Some(1), window, cx);
         let query_state = cx.new(|_| match target.clone() {
             Target::Table(table_target) => QueryState::from_table_target(table_target),
             Target::Sql(sql_target) => QueryState::from_sql_target("".to_string(), sql_target),
@@ -40,19 +40,14 @@ impl WorkspaceTab {
             cx.new(|cx| QueryEditor::new(window, cx, query_state.clone(), session.clone()));
         let table_view =
             cx.new(|cx| TableView::new(window, cx, query_state.clone(), session.clone()));
-        let center = DockLayout::tabs().panel_view(panel_handle(table_view), cx);
-        let bottom = DockLayout::tabs().panel_view(panel_handle(query_editor), cx);
-        dock_area.update(cx, |area, cx| {
-            area.set_center(center, window, cx);
-            area.set_dock(DockPlacement::Bottom, bottom, window, cx);
-            area.set_dock_size(DockPlacement::Bottom, px(260.), window, cx);
-            area.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
-        });
+        let layout_state = cx.new(|_| ResizableState::default());
         query_state.update(cx, |state, cx| state.execute(cx, session.clone()));
         Self {
             title,
             _database_session: session,
-            dock_area,
+            query_editor,
+            table_view,
+            layout_state,
         }
     }
 }
@@ -61,7 +56,7 @@ impl EventEmitter<PanelEvent> for WorkspaceTab {}
 
 impl Focusable for WorkspaceTab {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.dock_area.read(cx).focus_handle(cx)
+        self.query_editor.read(cx).focus_handle(cx)
     }
 }
 
@@ -86,6 +81,17 @@ impl Render for WorkspaceTab {
         div()
             .size_full()
             .overflow_hidden()
-            .child(self.dock_area.clone())
+            // Only the workspace dock handles document drops. Nested dock groups
+            // would claim drops for documents they do not own.
+            .child(
+                v_resizable("document-layout")
+                    .with_state(&self.layout_state)
+                    .child(resizable_panel().child(self.table_view.clone()))
+                    .child(
+                        resizable_panel()
+                            .size(px(260.))
+                            .child(self.query_editor.clone()),
+                    ),
+            )
     }
 }
