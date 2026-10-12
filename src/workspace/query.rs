@@ -441,9 +441,27 @@ impl QueryState {
                                     },
                                     QuerySource::Sql(_) => Some(false),
                                 };
-                                if matches!(&state.query, QuerySource::Sql(_)) {
-                                    if let Ok(count) = u64::try_from(output.rows.len()) {
-                                        state.total_rows = Some(count)
+                                if let Ok(count) = u64::try_from(output.rows.len()) {
+                                    match &state.query {
+                                        QuerySource::Sql(_) => state.total_rows = Some(count),
+                                        QuerySource::Table(table_query)
+                                            if state.has_next == Some(false)
+                                                && (count > 0 || table_query.offset() == 0) =>
+                                        {
+                                            if let Some(total) =
+                                                table_query.offset().checked_add(count)
+                                            {
+                                                state.total_rows = Some(total);
+                                            } else {
+                                                state.error_string = Some(
+                                                    "Total row count exceeds supported size"
+                                                        .to_owned(),
+                                                );
+                                                cx.notify();
+                                                return;
+                                            }
+                                        }
+                                        QuerySource::Table(_) => {}
                                     }
                                 }
                                 state.results = Some(output);
