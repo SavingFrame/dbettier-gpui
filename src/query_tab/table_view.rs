@@ -11,8 +11,8 @@ use gpui_kit::component::{
     table::{Column, DataTable, TableDelegate, TableState},
 };
 
+use super::query::{QuerySource, QueryState, QueryStatus, SortDirection, SortField};
 use crate::database::session::DatabaseSession;
-use crate::workspace::query::{QuerySource, QueryState, QueryStatus, SortDirection, SortField};
 
 struct ResultsTable {
     query_state: Entity<QueryState>,

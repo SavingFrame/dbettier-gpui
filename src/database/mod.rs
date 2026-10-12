@@ -7,6 +7,7 @@ pub(crate) mod profile_store;
 pub(crate) mod result;
 pub(crate) mod session;
 pub(crate) mod session_store;
+pub(crate) mod target;
 
 pub use catalog::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,

@@ -6,13 +6,10 @@ use gpui_kit::component::{
     resizable::{ResizableState, resizable_panel, v_resizable},
 };
 
-use super::{query_editor::QueryEditor, table_view::TableView};
-use crate::{
-    database::session::DatabaseSession,
-    workspace::{Target, query::QueryState},
-};
+use super::{editor::QueryEditor, query::QueryState, table_view::TableView};
+use crate::database::{session::DatabaseSession, target::Target};
 
-pub(crate) struct WorkspaceTab {
+pub(crate) struct QueryTab {
     title: String,
     _database_session: Entity<DatabaseSession>,
 
@@ -21,7 +18,7 @@ pub(crate) struct WorkspaceTab {
     layout_state: Entity<ResizableState>,
 }
 
-impl WorkspaceTab {
+impl QueryTab {
     pub(crate) fn new(
         target: Target,
         session: Entity<DatabaseSession>,
@@ -52,21 +49,21 @@ impl WorkspaceTab {
     }
 }
 
-impl EventEmitter<PanelEvent> for WorkspaceTab {}
+impl EventEmitter<PanelEvent> for QueryTab {}
 
-impl Focusable for WorkspaceTab {
+impl Focusable for QueryTab {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.query_editor.read(cx).focus_handle(cx)
     }
 }
 
-impl BasePanel for WorkspaceTab {
+impl BasePanel for QueryTab {
     fn panel_name(&self) -> &'static str {
         "WorkspaceDocument"
     }
 }
 
-impl Panel for WorkspaceTab {
+impl Panel for QueryTab {
     fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.title.clone()
     }
@@ -76,7 +73,7 @@ impl Panel for WorkspaceTab {
     }
 }
 
-impl Render for WorkspaceTab {
+impl Render for QueryTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()

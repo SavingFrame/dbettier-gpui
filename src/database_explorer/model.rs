@@ -8,7 +8,7 @@ use gpui_kit::{
 
 use crate::database::{
     DatabaseConnectionProfile, DatabaseSchema, DatabaseTable, LoadState,
-    session::DatabaseSessionState,
+    session::DatabaseSessionState, target::TableTarget,
 };
 
 use super::labels;
@@ -52,34 +52,6 @@ pub(super) enum RowAction {
     Schema { profile_id: String, name: String },
     Table(TableTarget),
     Section,
-}
-
-#[derive(Clone)]
-pub(crate) struct TableTarget {
-    pub(crate) profile_id: String,
-    pub(crate) schema_name: String,
-    pub(crate) table_name: String,
-}
-
-#[derive(Clone)]
-pub(crate) struct SqlTarget {
-    pub(crate) profile_id: String,
-    pub(crate) schema_name: Option<String>,
-}
-
-#[derive(Clone)]
-pub(crate) enum Target {
-    Table(TableTarget),
-    Sql(SqlTarget),
-}
-
-impl Target {
-    pub(crate) fn profile_id(&self) -> String {
-        match self {
-            Target::Table(table_target) => table_target.profile_id.clone(),
-            Target::Sql(sql_target) => sql_target.profile_id.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]

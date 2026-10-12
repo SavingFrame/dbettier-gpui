@@ -6,10 +6,10 @@ use gpui_kit::component::{
     tree::TreeEntry,
 };
 
-use crate::workspace::{Target, database_tree::SqlTarget};
+use crate::database::target::{SqlTarget, Target};
 
 use super::{
-    DatabaseTree,
+    DatabaseExplorer,
     model::{RowAction, RowInfo},
 };
 
@@ -49,7 +49,7 @@ pub(super) struct DatabaseTreeRow<'a> {
     expanded: bool,
     selected: bool,
     info: Option<&'a RowInfo>,
-    view: WeakEntity<DatabaseTree>,
+    view: WeakEntity<DatabaseExplorer>,
 }
 
 impl<'a> DatabaseTreeRow<'a> {
@@ -57,7 +57,7 @@ impl<'a> DatabaseTreeRow<'a> {
         entry: &TreeEntry,
         selected: bool,
         info: Option<&'a RowInfo>,
-        view: WeakEntity<DatabaseTree>,
+        view: WeakEntity<DatabaseExplorer>,
     ) -> Self {
         Self {
             id: entry.item().id.clone(),
@@ -237,36 +237,5 @@ impl<'a> DatabaseTreeRow<'a> {
                         )
                     }),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::model::TableTarget;
-    use super::*;
-
-    #[test]
-    fn row_clicks_select_and_double_clicks_activate() {
-        let table = RowAction::Table(TableTarget {
-            profile_id: "profile".to_owned(),
-            schema_name: "public".to_owned(),
-            table_name: "products".to_owned(),
-        });
-        for action in [&table, &RowAction::Section] {
-            assert_eq!(action.interaction(false, 1), RowInteraction::Select);
-            assert_eq!(action.interaction(false, 3), RowInteraction::Select);
-            assert_eq!(action.interaction(true, 1), RowInteraction::Toggle);
-            assert_eq!(action.interaction(true, 2), RowInteraction::Select);
-        }
-        assert_eq!(table.interaction(false, 2), RowInteraction::OpenTable);
-        assert_eq!(
-            RowAction::Section.interaction(false, 2),
-            RowInteraction::Toggle
-        );
-        let schema = RowAction::Schema {
-            profile_id: "profile".to_owned(),
-            name: "public".to_owned(),
-        };
-        assert_eq!(schema.interaction(false, 2), RowInteraction::Toggle);
     }
 }

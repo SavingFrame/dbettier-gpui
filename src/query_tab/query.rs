@@ -1,11 +1,9 @@
 use gpui::{Context, Entity, Task};
 
-use crate::{
-    database::{
-        result::{CellValue, QueryOutput},
-        session::DatabaseSession,
-    },
-    workspace::{TableTarget, database_tree::SqlTarget},
+use crate::database::{
+    result::{CellValue, QueryOutput},
+    session::DatabaseSession,
+    target::{SqlTarget, TableTarget},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]

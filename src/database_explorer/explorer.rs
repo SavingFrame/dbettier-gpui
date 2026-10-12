@@ -1,7 +1,3 @@
-mod labels;
-mod model;
-mod row;
-
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -18,18 +14,16 @@ use gpui_kit::component::{
     tree::{TreeEvent, TreeItem, TreeState, tree},
 };
 
+use super::{
+    model::{self, RowAction, RowInfo, TableSection, TreeBuilder},
+    row::{DatabaseTreeRow, RowInteraction},
+};
 use crate::database::{
     DatabaseConnectionProfile, profile_store::DatabaseProfileStore,
-    session_store::DatabaseSessionStore,
+    session_store::DatabaseSessionStore, target::Target,
 };
-use model::{RowAction, RowInfo, TableSection, TreeBuilder};
-use row::{DatabaseTreeRow, RowInteraction};
 
-pub(super) use model::SqlTarget;
-pub(super) use model::TableTarget;
-pub(super) use model::Target;
-
-pub(crate) struct DatabaseTree {
+pub(crate) struct DatabaseExplorer {
     focus_handle: gpui::FocusHandle,
     profile_store: Entity<DatabaseProfileStore>,
     session_store: Entity<DatabaseSessionStore>,
@@ -42,14 +36,14 @@ pub(crate) struct DatabaseTree {
     _tree_subscription: Subscription,
 }
 
-pub(super) enum DatabaseTreeEvent {
+pub(crate) enum DatabaseExplorerEvent {
     OpenTable(Target),
     EditConnection(Option<DatabaseConnectionProfile>),
 }
 
-impl EventEmitter<DatabaseTreeEvent> for DatabaseTree {}
+impl EventEmitter<DatabaseExplorerEvent> for DatabaseExplorer {}
 
-impl DatabaseTree {
+impl DatabaseExplorer {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let profile_store = DatabaseProfileStore::global(cx);
         let session_store = DatabaseSessionStore::global(cx);
@@ -138,14 +132,19 @@ impl DatabaseTree {
         }
     }
 
-    fn select_row(&mut self, id: &SharedString, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn select_row(
+        &mut self,
+        id: &SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.tree_state.update(cx, |state, cx| {
             state.set_selected_index(state.index_of(id), cx);
             state.focus(window, cx);
         });
     }
 
-    fn activate_row(
+    pub(super) fn activate_row(
         &mut self,
         id: &SharedString,
         arrow: bool,
@@ -174,16 +173,16 @@ impl DatabaseTree {
         self.rebuild(cx);
     }
 
-    fn on_open_table(&mut self, target: Target, cx: &mut Context<Self>) {
-        cx.emit(DatabaseTreeEvent::OpenTable(target));
+    pub(super) fn on_open_table(&mut self, target: Target, cx: &mut Context<Self>) {
+        cx.emit(DatabaseExplorerEvent::OpenTable(target));
     }
 
-    fn edit_connection(
+    pub(super) fn edit_connection(
         &mut self,
         profile: Option<DatabaseConnectionProfile>,
         cx: &mut Context<Self>,
     ) {
-        cx.emit(DatabaseTreeEvent::EditConnection(profile));
+        cx.emit(DatabaseExplorerEvent::EditConnection(profile));
     }
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
@@ -211,15 +210,15 @@ impl DatabaseTree {
     }
 }
 
-impl gpui::Focusable for DatabaseTree {
+impl gpui::Focusable for DatabaseExplorer {
     fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl gpui::EventEmitter<PanelEvent> for DatabaseTree {}
+impl gpui::EventEmitter<PanelEvent> for DatabaseExplorer {}
 
-impl BasePanel for DatabaseTree {
+impl BasePanel for DatabaseExplorer {
     fn panel_name(&self) -> &'static str {
         "DatabaseTree"
     }
@@ -229,7 +228,7 @@ impl BasePanel for DatabaseTree {
     }
 }
 
-impl Panel for DatabaseTree {
+impl Panel for DatabaseExplorer {
     fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         "Database"
     }
@@ -239,7 +238,7 @@ impl Panel for DatabaseTree {
     }
 }
 
-impl Render for DatabaseTree {
+impl Render for DatabaseExplorer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let rows = self.rows.clone();
@@ -283,7 +282,7 @@ impl Render for DatabaseTree {
     }
 }
 
-fn render_header(theme: &Theme, cx: &Context<DatabaseTree>) -> impl IntoElement {
+fn render_header(theme: &Theme, cx: &Context<DatabaseExplorer>) -> impl IntoElement {
     div()
         .h(px(44.))
         .flex_none()

@@ -1,10 +1,3 @@
-mod database_tree;
-mod query;
-mod query_editor;
-mod status_bar;
-mod tab_bar;
-mod table_view;
-
 use gpui::{Context, Entity, Subscription, Window, div, prelude::*, px};
 use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
@@ -12,17 +5,14 @@ use gpui_kit::component::{
     notification::Notification,
 };
 
-use self::{
-    database_tree::{DatabaseTree, DatabaseTreeEvent, TableTarget},
-    status_bar::StatusBar,
-    tab_bar::WorkspaceTab,
-};
+use super::status_bar::StatusBar;
 use crate::{
     database::{
         profile_store::DatabaseProfileStore, session::DatabaseSessionEvent,
-        session_store::DatabaseSessionStore,
+        session_store::DatabaseSessionStore, target::Target,
     },
-    workspace::database_tree::Target,
+    database_explorer::{DatabaseExplorer, DatabaseExplorerEvent},
+    query_tab::QueryTab,
 };
 
 struct ConnectionErrorNotification;
@@ -32,7 +22,7 @@ pub(crate) struct Workspace {
     _profile_store_subscription: Subscription,
     session_store: Entity<DatabaseSessionStore>,
     _session_store_subscription: Subscription,
-    _database_tree_subscription: Subscription,
+    _database_explorer_subscription: Subscription,
     status_bar: Entity<StatusBar>,
     dock_area: Entity<DockArea>,
 }
@@ -63,13 +53,15 @@ impl Workspace {
             },
         );
 
-        let database_tree = cx.new(DatabaseTree::new);
-        let database_tree_subscription = cx.subscribe_in(
-            &database_tree,
+        let database_explorer = cx.new(DatabaseExplorer::new);
+        let database_explorer_subscription = cx.subscribe_in(
+            &database_explorer,
             window,
-            |workspace, _, event: &DatabaseTreeEvent, window, cx| match event {
-                DatabaseTreeEvent::OpenTable(target) => workspace.open_table(target, window, cx),
-                DatabaseTreeEvent::EditConnection(profile) => {
+            |workspace, _, event: &DatabaseExplorerEvent, window, cx| match event {
+                DatabaseExplorerEvent::OpenTable(target) => {
+                    workspace.open_table(target, window, cx)
+                }
+                DatabaseExplorerEvent::EditConnection(profile) => {
                     if let Err(error) = crate::connection_editor::open(profile.as_ref(), cx) {
                         window.push_notification(
                             Notification::error(format!(
@@ -84,7 +76,7 @@ impl Workspace {
         let (dock_area, skin) = DockSkin::dock_area("workspace", Some(1), window, cx);
         skin.set_panel_style(PanelStyle::TabBar, cx);
         skin.set_close_button_visible(true, cx);
-        let left = DockLayout::tabs().panel_view(panel_handle(database_tree), cx);
+        let left = DockLayout::tabs().panel_view(panel_handle(database_explorer), cx);
         dock_area.update(cx, |area, cx| {
             area.set_center(DockLayout::tabs(), window, cx);
             area.set_dock(DockPlacement::Left, left, window, cx);
@@ -97,14 +89,14 @@ impl Workspace {
             _profile_store_subscription: profile_store_subscription,
             session_store,
             _session_store_subscription: session_store_subscription,
-            _database_tree_subscription: database_tree_subscription,
+            _database_explorer_subscription: database_explorer_subscription,
             status_bar: cx.new(|_| StatusBar),
             dock_area,
         }
     }
 
     fn open_table(&mut self, target: &Target, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(profile) = self.profile_store.read(cx).get(&target.profile_id()) else {
+        let Some(profile) = self.profile_store.read(cx).get(target.profile_id()) else {
             window.push_notification(
                 Notification::error("The connection profile no longer exists"),
                 cx,
@@ -114,10 +106,10 @@ impl Workspace {
         let session = self
             .session_store
             .update(cx, |store, cx| store.connect(profile, cx));
-        let document = cx.new(|cx| WorkspaceTab::new(target.clone(), session, window, cx));
-        let document = panel_handle(document);
+        let tab = cx.new(|cx| QueryTab::new(target.clone(), session, window, cx));
+        let tab = panel_handle(tab);
         self.dock_area.update(cx, |area, cx| {
-            area.add_panel_view(document, DockPlacement::Center, None, window, cx);
+            area.add_panel_view(tab, DockPlacement::Center, None, window, cx);
         });
     }
 }

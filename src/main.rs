@@ -6,6 +6,8 @@ mod app;
 mod assets;
 mod connection_editor;
 mod database;
+mod database_explorer;
+mod query_tab;
 mod runtime;
 mod workspace;
 

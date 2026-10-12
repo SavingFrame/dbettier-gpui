@@ -12,10 +12,8 @@ use gpui_kit::{
     },
 };
 
-use crate::{
-    database::session::DatabaseSession,
-    workspace::query::{QuerySource, QueryState, QueryStatus, SqlQuery},
-};
+use super::query::{QueryState, QueryStatus};
+use crate::database::session::DatabaseSession;
 
 pub(crate) struct QueryEditor {
     editor: Entity<EditorState>,
