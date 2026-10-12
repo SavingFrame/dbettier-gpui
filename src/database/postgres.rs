@@ -4,7 +4,7 @@ use std::{collections::HashMap, time::Instant};
 use sqlx::{
     Column, Connection, Either, Executor, PgPool, Row, SqlSafeStr, TypeInfo, ValueRef,
     postgres::{PgConnection, PgRow},
-    types::chrono::{DateTime, Utc},
+    types::chrono::{DateTime, NaiveDateTime, Utc},
 };
 
 use crate::database::{
@@ -271,6 +271,10 @@ fn decode_cell(row: &PgRow, index: usize) -> Result<CellValue, sqlx::Error> {
         "JSONB" | "JSON" => CellValue::Json(row.try_get(index)?),
         "TIMESTAMPTZ" => {
             let timestamp = row.try_get::<DateTime<Utc>, _>(index)?;
+            CellValue::Timestamp(timestamp.to_string())
+        }
+        "TIMESTAMP" => {
+            let timestamp = row.try_get::<NaiveDateTime, _>(index)?;
             CellValue::Timestamp(timestamp.to_string())
         }
         type_name => {
