@@ -33,6 +33,7 @@ pub(crate) fn run() {
                 return;
             }
             init(cx);
+            crate::connection_editor::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
             Theme::update(cx, |theme| {
                 theme.notification.max_items = 3;

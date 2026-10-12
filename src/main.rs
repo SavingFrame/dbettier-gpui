@@ -4,6 +4,7 @@ extern crate gpui_kit as gpui;
 
 mod app;
 mod assets;
+mod connection_editor;
 mod database;
 mod runtime;
 mod workspace;

@@ -69,6 +69,16 @@ impl Workspace {
             window,
             |workspace, _, event: &DatabaseTreeEvent, window, cx| match event {
                 DatabaseTreeEvent::OpenTable(target) => workspace.open_table(target, window, cx),
+                DatabaseTreeEvent::EditConnection(profile) => {
+                    if let Err(error) = crate::connection_editor::open(profile.as_ref(), cx) {
+                        window.push_notification(
+                            Notification::error(format!(
+                                "Could not open connection editor: {error}"
+                            )),
+                            cx,
+                        );
+                    }
+                }
             },
         );
         let (dock_area, skin) = DockSkin::dock_area("workspace", Some(1), window, cx);

@@ -94,6 +94,10 @@ impl<'a> DatabaseTreeRow<'a> {
         let context_id = id.clone();
         let context_view = self.view.clone();
 
+        let profile = row.and_then(|row| match &row.action {
+            Some(RowAction::Profile(profile)) => Some(profile.clone()),
+            _ => None,
+        });
         let sql_target = row.and_then(|row| match &row.action {
             Some(RowAction::Schema { profile_id, name }) => Some(SqlTarget {
                 profile_id: profile_id.clone(),
@@ -196,6 +200,23 @@ impl<'a> DatabaseTreeRow<'a> {
                         )
                     })
                     .context_menu(move |menu, window, cx| {
+                        if let Some(profile) = profile.clone() {
+                            if let Some(view) = context_view.upgrade() {
+                                view.update(cx, |view, cx| {
+                                    view.select_row(&context_id, window, cx)
+                                });
+                            }
+                            let edit_view = context_view.clone();
+                            return menu.item(PopupMenuItem::new("Edit connection...").on_click(
+                                move |_, _, cx| {
+                                    if let Some(view) = edit_view.upgrade() {
+                                        view.update(cx, |view, cx| {
+                                            view.edit_connection(Some(profile.clone()), cx)
+                                        });
+                                    }
+                                },
+                            ));
+                        }
                         let Some(target) = sql_target.clone() else {
                             return menu;
                         };

@@ -18,7 +18,10 @@ use gpui_kit::component::{
     tree::{TreeEvent, TreeItem, TreeState, tree},
 };
 
-use crate::database::{profile_store::DatabaseProfileStore, session_store::DatabaseSessionStore};
+use crate::database::{
+    DatabaseConnectionProfile, profile_store::DatabaseProfileStore,
+    session_store::DatabaseSessionStore,
+};
 use model::{RowAction, RowInfo, TableSection, TreeBuilder};
 use row::{DatabaseTreeRow, RowInteraction};
 
@@ -41,6 +44,7 @@ pub(crate) struct DatabaseTree {
 
 pub(super) enum DatabaseTreeEvent {
     OpenTable(Target),
+    EditConnection(Option<DatabaseConnectionProfile>),
 }
 
 impl EventEmitter<DatabaseTreeEvent> for DatabaseTree {}
@@ -174,6 +178,14 @@ impl DatabaseTree {
         cx.emit(DatabaseTreeEvent::OpenTable(target));
     }
 
+    fn edit_connection(
+        &mut self,
+        profile: Option<DatabaseConnectionProfile>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(DatabaseTreeEvent::EditConnection(profile));
+    }
+
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let profiles = self.profile_store.read(cx).profiles().to_vec();
         let mut builder = TreeBuilder::new(&self.expanded_items);
@@ -241,7 +253,7 @@ impl Render for DatabaseTree {
             .flex_col()
             .bg(theme.sidebar)
             .text_color(theme.sidebar_foreground)
-            .child(render_header(theme))
+            .child(render_header(theme, cx))
             .child(
                 div()
                     .flex_1()
@@ -271,7 +283,7 @@ impl Render for DatabaseTree {
     }
 }
 
-fn render_header(theme: &Theme) -> impl IntoElement {
+fn render_header(theme: &Theme, cx: &Context<DatabaseTree>) -> impl IntoElement {
     div()
         .h(px(44.))
         .flex_none()
@@ -296,7 +308,8 @@ fn render_header(theme: &Theme) -> impl IntoElement {
                         .ghost()
                         .small()
                         .icon(IconName::Plus)
-                        .tooltip("Add database connection"),
+                        .tooltip("Add database connection")
+                        .on_click(cx.listener(|tree, _, _, cx| tree.edit_connection(None, cx))),
                 )
                 .child(
                     Button::new("refresh-database-catalog")
