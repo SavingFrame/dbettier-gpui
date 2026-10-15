@@ -25,6 +25,22 @@ pub enum DatabaseError {
     ExecuteQuery(#[source] sqlx::Error),
 }
 
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ConnectionParameters {
+    pub(crate) host: String,
+    pub(crate) port: String,
+    pub(crate) database: String,
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) ssl_mode: String,
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ConnectionDetails {
+    Parameters(ConnectionParameters),
+    Uri(String),
+}
+
 #[derive(Clone)]
 pub enum DatabaseConnection {
     PostgreSql(PostgresDriver),
@@ -74,9 +90,22 @@ impl DatabaseConnection {
         profile: DatabaseConnectionProfile,
     ) -> Result<Self, DatabaseError> {
         match profile.backend {
-            DatabaseBackend::PostgreSql => PostgresDriver::new(profile.uri)
+            DatabaseBackend::PostgreSql => {
+                PostgresDriver::new(ConnectionDetails::Parameters(profile.fields))
+                    .await
+                    .map(DatabaseConnection::PostgreSql)
+                    .map_err(DatabaseError::Connect)
+            }
+        }
+    }
+
+    pub async fn test_connection(
+        connection_details: ConnectionDetails,
+        backend: DatabaseBackend,
+    ) -> Result<String, DatabaseError> {
+        match backend {
+            DatabaseBackend::PostgreSql => PostgresDriver::test_connection(connection_details)
                 .await
-                .map(DatabaseConnection::PostgreSql)
                 .map_err(DatabaseError::Connect),
         }
     }

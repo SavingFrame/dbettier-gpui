@@ -6,12 +6,13 @@ use gpui_kit::component::{
     select::Select,
 };
 
+use super::ConnectionEditor;
 use super::model::ConnectionInputMode;
-use super::{CancelConnection, ConnectionEditor, ConnectionEditorStatus, SaveConnection};
 
 impl ConnectionEditor {
     fn render_footer(&self, cx: &Context<Self>) -> gpui::AnyElement {
-        let busy = self.status.busy();
+        // let busy = self.status.busy();
+        let busy = false; // TODO:
         div()
             .flex()
             .items_center()
@@ -24,28 +25,24 @@ impl ConnectionEditor {
             .border_color(cx.theme().border)
             .child(
                 Button::new("test-connection")
-                    .label(if matches!(self.status, ConnectionEditorStatus::Testing) {
-                        "Testing..."
-                    } else {
-                        "Test Connection"
-                    })
-                    .loading(matches!(self.status, ConnectionEditorStatus::Testing))
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.draft(cx);
+                    }))
+                    // .label(if matches!(self.status, ConnectionEditorStatus::Testing) {
+                    //     "Testing..."
+                    // } else {
+                    //     "Test Connection"
+                    // })
+                    // .loading(matches!(self.status, ConnectionEditorStatus::Testing))
                     .disabled(busy)
-                    .on_click(cx.listener(|editor, _, _, cx| editor.request_test(cx))),
+                    .label("Test connection"), // .on_click(cx.listener(|editor, _, _, cx| editor.request_test(cx))),
             )
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        Button::new("cancel-connection")
-                            .ghost()
-                            .label("Cancel")
-                            .on_click(
-                                cx.listener(|editor, _, window, cx| editor.cancel(window, cx)),
-                            ),
-                    )
+                    .child(Button::new("cancel-connection").ghost().label("Cancel"))
                     .child(
                         Button::new("save-connection")
                             .primary()
@@ -54,9 +51,8 @@ impl ConnectionEditor {
                             } else {
                                 "Add Connection"
                             })
-                            .loading(matches!(self.status, ConnectionEditorStatus::Saving))
-                            .disabled(busy)
-                            .on_click(cx.listener(|editor, _, _, cx| editor.request_save(cx))),
+                            // .loading(matches!(self.status, ConnectionEditorStatus::Saving))
+                            .disabled(busy),
                     ),
             )
             .into_any_element()
@@ -68,6 +64,7 @@ impl ConnectionEditor {
         state: &Entity<InputState>,
         secret: bool,
     ) -> impl IntoElement {
+        let busy = false; // TODO:
         div()
             .flex()
             .flex_col()
@@ -78,7 +75,7 @@ impl ConnectionEditor {
             .child(
                 Input::new(state)
                     .aria_label(label)
-                    .disabled(self.status.busy())
+                    .disabled(busy)
                     .when(secret, |input| input.mask_toggle()),
             )
     }
@@ -87,18 +84,20 @@ impl ConnectionEditor {
 impl ConnectionEditor {
     fn render_form(&self, cx: &Context<Self>) -> gpui::AnyElement {
         let theme = cx.theme();
-        let busy = self.status.busy();
-        let (message, color) = match &self.status {
-            ConnectionEditorStatus::Idle => (
-                "Test the connection before saving (optional).",
-                theme.muted_foreground,
-            ),
-            ConnectionEditorStatus::Testing => ("Testing connection...", theme.muted_foreground),
-            ConnectionEditorStatus::Saving => ("Saving connection...", theme.muted_foreground),
-            ConnectionEditorStatus::Success(message) => (message.as_str(), theme.success),
-            ConnectionEditorStatus::Error(message) => (message.as_str(), theme.danger),
-            ConnectionEditorStatus::Notice(message) => (message.as_str(), theme.muted_foreground),
-        };
+        let busy = false; // TODO:
+        let message = "Test the connection before saving (optional).".to_string();
+        let color = theme.muted_foreground;
+        // let (message, color) = match &self.status {
+        //     ConnectionEditorStatus::Idle => (
+        //         "Test the connection before saving (optional).",
+        //         theme.muted_foreground,
+        //     ),
+        //     ConnectionEditorStatus::Testing => ("Testing connection...", theme.muted_foreground),
+        //     ConnectionEditorStatus::Saving => ("Saving connection...", theme.muted_foreground),
+        //     ConnectionEditorStatus::Success(message) => (message.as_str(), theme.success),
+        //     ConnectionEditorStatus::Error(message) => (message.as_str(), theme.danger),
+        //     ConnectionEditorStatus::Notice(message) => (message.as_str(), theme.muted_foreground),
+        // };
         div()
             .flex()
             .flex_col()
@@ -152,7 +151,6 @@ impl ConnectionEditor {
                                         .disabled(busy)
                                         .on_click(cx.listener(move |editor, _, window, cx| {
                                             editor.mode = mode;
-                                            editor.clear_feedback(cx);
                                             let state = match mode {
                                                 ConnectionInputMode::Fields => &editor.host,
                                                 ConnectionInputMode::Uri => &editor.uri,
@@ -253,10 +251,6 @@ impl Render for ConnectionEditor {
             .overflow_hidden()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .on_action(cx.listener(|editor, _: &SaveConnection, _, cx| editor.request_save(cx)))
-            .on_action(
-                cx.listener(|editor, _: &CancelConnection, window, cx| editor.cancel(window, cx)),
-            )
             .child(
                 div()
                     .flex_none()

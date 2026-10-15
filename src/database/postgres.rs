@@ -10,6 +10,7 @@ use sqlx::{
 use crate::database::{
     ConstraintType, DatabaseSchema, DatabaseTable, LoadState, TableColumn, TableConstraint,
     TableIndex,
+    connection::ConnectionDetails,
     result::{CellValue, QueryOutput, ResultColumn},
 };
 
@@ -19,14 +20,6 @@ pub struct PostgresDriver {
 }
 
 impl PostgresDriver {
-    pub async fn test_connection(connection_uri: &str) -> Result<String, sqlx::Error> {
-        let mut conn = PgConnection::connect(connection_uri).await?;
-        let row = sqlx::query("SELECT version();")
-            .fetch_one(&mut conn)
-            .await?;
-        row.try_get(0)
-    }
-
     pub async fn list_schemas(&self) -> Result<Vec<DatabaseSchema>, sqlx::Error> {
         let rows = sqlx::query("SELECT schema_name FROM information_schema.schemata")
             .fetch_all(&self.pool)
@@ -242,13 +235,41 @@ impl PostgresDriver {
         })
     }
 
-    pub async fn new(connection_uri: String) -> Result<Self, sqlx::Error> {
-        let pool = PgPool::connect(&connection_uri).await?;
+    pub async fn new(connection_details: ConnectionDetails) -> Result<Self, sqlx::Error> {
+        let pool = PgPool::connect(&Self::details_to_uri(connection_details)).await?;
         Ok(Self { pool })
     }
 
     pub async fn close(&self) {
         self.pool.close().await;
+    }
+
+    pub(crate) fn details_to_uri(connection_details: ConnectionDetails) -> String {
+        match connection_details {
+            ConnectionDetails::Parameters(params) => {
+                let mut uri = format!("postgresql://{}", params.username);
+                if !params.password.is_empty() {
+                    uri.push_str(&format!(":{}", params.password));
+                };
+                uri.push_str(&format!(
+                    "@{}:{}/{}",
+                    params.host, params.port, params.database
+                ));
+                uri
+            }
+            ConnectionDetails::Uri(uri) => uri,
+        }
+    }
+
+    pub async fn test_connection(
+        connection_details: ConnectionDetails,
+    ) -> Result<String, sqlx::Error> {
+        let connection_uri = Self::details_to_uri(connection_details);
+        let mut conn = PgConnection::connect(&connection_uri).await?;
+        let row = sqlx::query("SELECT version();")
+            .fetch_one(&mut conn)
+            .await?;
+        row.try_get(0)
     }
 }
 fn decode_cell(row: &PgRow, index: usize) -> Result<CellValue, sqlx::Error> {

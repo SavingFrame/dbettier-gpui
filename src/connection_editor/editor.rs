@@ -1,6 +1,4 @@
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Subscription, Window,
-};
+use gpui::{App, AppContext as _, Context, Entity, FocusHandle, Subscription, Window};
 use gpui_kit::component::{
     IndexPath,
     input::{InputEvent, InputState},
@@ -8,7 +6,7 @@ use gpui_kit::component::{
 };
 
 use super::model::ConnectionInputMode;
-use super::{ConnectionDetails, ConnectionDraft, ConnectionEditorEvent, ConnectionEditorStatus};
+use super::{ConnectionDetails, ConnectionDraft};
 use crate::database::DatabaseConnectionProfile;
 
 pub(crate) struct ConnectionEditor {
@@ -23,11 +21,9 @@ pub(crate) struct ConnectionEditor {
     pub(super) password: Entity<InputState>,
     pub(super) uri: Entity<InputState>,
     pub(super) ssl_mode: Entity<SelectState<Vec<&'static str>>>,
-    pub(super) status: ConnectionEditorStatus,
-    _subscriptions: Vec<Subscription>,
+    // pub(super) status: ConnectionEditorStatus,
+    // _subscriptions: Vec<Subscription>,
 }
-
-impl EventEmitter<ConnectionEditorEvent> for ConnectionEditor {}
 
 impl ConnectionEditor {
     pub(crate) fn new(
@@ -47,8 +43,11 @@ impl ConnectionEditor {
         let database = input("", "Database name", false, window, cx);
         let username = input("", "Username", false, window, cx);
         let password = input("", "Password", true, window, cx);
+        let initial_uri = profile
+            .map(|profile| profile.generate_uri())
+            .unwrap_or_default();
         let uri = input(
-            profile.map_or("", |profile| &profile.uri),
+            &initial_uri,
             "postgresql://user:password@host:5432/database",
             true,
             window,
@@ -69,20 +68,6 @@ impl ConnectionEditor {
                 cx,
             )
         });
-        let mut subscriptions = Vec::new();
-        for state in [&name, &host, &port, &database, &username, &password, &uri] {
-            subscriptions.push(cx.subscribe(state, |editor, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    editor.clear_feedback(cx);
-                }
-            }));
-        }
-        subscriptions.push(cx.subscribe(
-            &ssl_mode,
-            |editor, _, _: &SelectEvent<Vec<&'static str>>, cx| {
-                editor.clear_feedback(cx);
-            },
-        ));
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -101,8 +86,7 @@ impl ConnectionEditor {
             password,
             uri,
             ssl_mode,
-            status: ConnectionEditorStatus::Idle,
-            _subscriptions: subscriptions,
+            // status: ConnectionEditorStatus::Idle,
         }
     }
 
@@ -130,46 +114,6 @@ impl ConnectionEditor {
                 }
             },
         }
-    }
-
-    pub(crate) fn set_status(&mut self, status: ConnectionEditorStatus, cx: &mut Context<Self>) {
-        self.status = status;
-        cx.notify();
-    }
-
-    pub(super) fn clear_feedback(&mut self, cx: &mut Context<Self>) {
-        if !self.status.busy() {
-            self.set_status(ConnectionEditorStatus::Idle, cx);
-        }
-    }
-
-    pub(super) fn request_save(&mut self, cx: &mut Context<Self>) {
-        if !self.status.busy() {
-            self.set_status(
-                ConnectionEditorStatus::Notice(
-                    "Saving is not configured yet. No connection was saved.".to_owned(),
-                ),
-                cx,
-            );
-            cx.emit(ConnectionEditorEvent::SaveRequested(self.draft(cx)));
-        }
-    }
-
-    pub(super) fn request_test(&mut self, cx: &mut Context<Self>) {
-        if !self.status.busy() {
-            self.set_status(
-                ConnectionEditorStatus::Notice(
-                    "Connection testing is not configured yet. No test was run.".to_owned(),
-                ),
-                cx,
-            );
-            cx.emit(ConnectionEditorEvent::TestRequested(self.draft(cx)));
-        }
-    }
-
-    pub(super) fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(ConnectionEditorEvent::Cancelled);
-        window.remove_window();
     }
 }
 
