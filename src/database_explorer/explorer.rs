@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _, Theme,
+    ActiveTheme as _, Sizable as _, Theme, WindowExt,
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelEvent},
     tree::{TreeEvent, TreeItem, TreeState, tree},
@@ -208,10 +208,47 @@ impl DatabaseExplorer {
         });
         cx.notify();
     }
-    fn remove_connection(&self, profile_uuid: &str, cx: &mut Context<Self>) {
-        self.profile_store.update(cx, |profile_store, cx| {
+
+    pub(super) fn remove_connection(&self, profile_uuid: &str, cx: &mut Context<Self>) {
+        if let Err(error) = self.profile_store.update(cx, |profile_store, cx| {
             profile_store.remove(profile_uuid, cx)
+        }) {
+            eprintln!("Can't remove profile, error: {error}")
+        };
+    }
+
+    pub(super) fn confirm_remove_connection(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self.selected_profile(cx) else {
+            return;
+        };
+        let remove_view = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let remove_view = remove_view.clone();
+            let profile_uuid = profile.uuid.clone();
+            alert
+                .title("Remove profile")
+                .description(
+                    "Are you sure you want to delete this profile? This action cannot be undone.",
+                )
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    if let Some(view) = remove_view.upgrade() {
+                        view.update(cx, |view, cx| {
+                            view.remove_connection(&profile_uuid, cx);
+                        })
+                    };
+                    true
+                })
         });
+    }
+
+    fn selected_profile(&self, cx: &mut Context<Self>) -> Option<DatabaseConnectionProfile> {
+        let selected = self.tree_state.read(cx).selected_item()?;
+        let action = self.rows.get(&selected.id)?.action.as_ref()?;
+        match action {
+            RowAction::Profile(profile) => Some(profile.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -320,7 +357,10 @@ fn render_header(theme: &Theme, cx: &Context<DatabaseExplorer>) -> impl IntoElem
                         .ghost()
                         .small()
                         .icon(IconName::Minus)
-                        .tooltip("Remove database connection"),
+                        .tooltip("Remove database connection")
+                        .on_click(cx.listener(|tree, _, window, cx| {
+                            tree.confirm_remove_connection(window, cx);
+                        })),
                 )
                 .child(
                     Button::new("refresh-database-catalog")

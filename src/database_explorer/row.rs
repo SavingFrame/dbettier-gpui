@@ -1,4 +1,6 @@
-use gpui::{App, MouseButton, SharedString, WeakEntity, div, prelude::*, px, svg};
+use gpui::{
+    App, MouseButton, SharedString, WeakEntity, component::WindowExt, div, prelude::*, px, svg,
+};
 use gpui_kit::component::{
     ActiveTheme as _,
     list::ListItem,
@@ -207,6 +209,7 @@ impl<'a> DatabaseTreeRow<'a> {
                                 });
                             }
                             let edit_view = context_view.clone();
+                            let remove_view = context_view.clone();
                             return menu
                                 .item(PopupMenuItem::new("Edit connection...").on_click(
                                     move |_, _, cx| {
@@ -217,7 +220,17 @@ impl<'a> DatabaseTreeRow<'a> {
                                         }
                                     },
                                 ))
-                                .item(PopupMenuItem::new("Remove connection"));
+                                .item(PopupMenuItem::new("Remove connection").on_click(
+                                    move |_, window, cx| {
+                                        if let Err(error) =
+                                            remove_view.update(cx, |view, cx| {
+                                                view.confirm_remove_connection(window, cx);
+                                            })
+                                        {
+                                            eprintln!("Error on creating confirmation remove connection window {error}")
+                                        };
+                                    },
+                                ));
                         }
                         let Some(target) = sql_target.clone() else {
                             return menu;
