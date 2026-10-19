@@ -27,6 +27,7 @@ pub trait DatabaseStorage {
     fn save(&self, profiles: &[DatabaseConnectionProfile]) -> Result<(), StorageError>;
 }
 
+#[derive(Clone)]
 pub struct FileDatabaseStorage {
     path: PathBuf,
 }

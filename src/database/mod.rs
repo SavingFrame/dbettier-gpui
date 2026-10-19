@@ -1,7 +1,7 @@
 mod catalog;
-mod connection;
+pub(crate) mod connection;
 mod postgres;
-mod profile;
+pub(crate) mod profile;
 pub(crate) mod profile_storage;
 pub(crate) mod profile_store;
 pub(crate) mod result;

@@ -1,5 +1,7 @@
 use gpui::{App, AppContext, Context, Entity, Global};
 
+use crate::database::{connection::ConnectionParameters, profile::DatabaseBackend, profile_store};
+
 use super::{
     DatabaseConnectionProfile,
     profile_storage::{DatabaseStorage, FileDatabaseStorage},
@@ -13,6 +15,7 @@ impl Global for GlobalDatabaseProfileStore {}
 pub(crate) struct DatabaseProfileStore {
     profiles: Vec<DatabaseConnectionProfile>,
     load_error: Option<String>,
+    storage: Option<FileDatabaseStorage>,
 }
 
 impl DatabaseProfileStore {
@@ -27,14 +30,15 @@ impl DatabaseProfileStore {
 
         if let Some(database_storage) = database_storage {
             cx.spawn(async move |profile_store, cx| {
-                let profiles = cx
-                    .background_spawn(async move { database_storage.load() })
+                let (profiles, database_storage) = cx
+                    .background_spawn(async move { (database_storage.load(), database_storage) })
                     .await;
 
                 if let Err(error) = profile_store.update(cx, |profile_store, cx| {
                     match profiles {
                         Ok(profiles) => {
                             profile_store.profiles = profiles;
+                            profile_store.storage = Some(database_storage);
                             profile_store.load_error = None;
                         }
                         Err(error) => {
@@ -52,6 +56,7 @@ impl DatabaseProfileStore {
 
         Self {
             profiles: Vec::new(),
+            storage: None,
             load_error,
         }
     }
@@ -73,6 +78,83 @@ impl DatabaseProfileStore {
             .iter()
             .find(|profile| profile.uuid == profile_uuid)
             .cloned()
+    }
+
+    pub(crate) fn save_existing(
+        &mut self,
+        profile_uuid: &str,
+        name: String,
+        connection_parameters: ConnectionParameters,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui::Task<Result<(), String>>, String> {
+        let profile_uuid = profile_uuid.to_string();
+
+        let storage = self
+            .storage
+            .clone()
+            .ok_or_else(|| "Storage does not exists in the profile store".to_string())?;
+
+        let mut profiles = self.profiles.clone();
+        let profile = profiles
+            .iter_mut()
+            .find(|profile| profile.uuid == profile_uuid)
+            .ok_or_else(|| format!("profile with {profile_uuid} not found"))?;
+        profile.name = name;
+        profile.fields = connection_parameters;
+        let task = cx.spawn(async move |profile_store, cx| {
+            let (save_result, profiles) = cx
+                .background_spawn(async move {
+                    let save_result = storage.save(&profiles);
+                    (save_result, profiles)
+                })
+                .await;
+            save_result.map_err(|error| error.to_string())?;
+            profile_store
+                .update(cx, |profile_store, cx| {
+                    profile_store.profiles = profiles;
+                    cx.notify();
+                })
+                .map_err(|error| error.to_string())
+        });
+        Ok(task)
+    }
+
+    pub(crate) fn create(
+        &mut self,
+        name: String,
+        connection_parameters: ConnectionParameters,
+        backend: DatabaseBackend,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui::Task<Result<(), String>>, String> {
+        let storage = self
+            .storage
+            .clone()
+            .ok_or_else(|| "Storage does not exists in the profile store".to_string())?;
+
+        let mut profiles = self.profiles.clone();
+        let profile = DatabaseConnectionProfile {
+            name,
+            uuid: uuid::Uuid::now_v7().to_string(),
+            fields: connection_parameters,
+            backend,
+        };
+        profiles.push(profile);
+        let task = cx.spawn(async move |profile_store, cx| {
+            let (save_result, profiles) = cx
+                .background_spawn(async move {
+                    let save_result = storage.save(&profiles);
+                    (save_result, profiles)
+                })
+                .await;
+            save_result.map_err(|error| error.to_string())?;
+            profile_store
+                .update(cx, |profile_store, cx| {
+                    profile_store.profiles = profiles;
+                    cx.notify();
+                })
+                .map_err(|error| error.to_string())
+        });
+        Ok(task)
     }
 
     pub(crate) fn load_error(&self) -> Option<&str> {
