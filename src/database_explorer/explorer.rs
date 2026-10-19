@@ -4,7 +4,7 @@ use std::{
 };
 
 use gpui::{
-    Context, Entity, EventEmitter, SharedString, Subscription, Task, Window, div, prelude::*, px,
+    Context, Entity, EventEmitter, SharedString, Subscription, Window, div, prelude::*, px,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{

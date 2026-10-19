@@ -1,6 +1,4 @@
-use gpui::{
-    App, MouseButton, SharedString, WeakEntity, component::WindowExt, div, prelude::*, px, svg,
-};
+use gpui::{App, MouseButton, SharedString, WeakEntity, div, prelude::*, px, svg};
 use gpui_kit::component::{
     ActiveTheme as _,
     list::ListItem,

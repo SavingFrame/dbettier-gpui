@@ -31,13 +31,6 @@ pub(crate) fn open(
         cx,
         |window, cx| {
             let editor = cx.new(|cx| ConnectionEditor::new(profile, window, cx));
-            let close_editor = editor.downgrade();
-            // window.on_window_should_close(cx, move |_, cx| {
-            //     if let Some(editor) = close_editor.upgrade() {
-            //         editor.update(cx, |_, cx| cx.emit(ConnectionEditorEvent::Cancelled));
-            //     }
-            //     true
-            // });
             let name = editor.read(cx).name.clone();
             name.update(cx, |name, cx| name.focus(window, cx));
             editor

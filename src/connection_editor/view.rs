@@ -8,7 +8,7 @@ use gpui_kit::component::{
 
 use crate::{
     connection_editor::model::{SaveConnectionStatus, TestConnectionStatus},
-    database::{profile::DatabaseBackend, profile_store::WriteStatus},
+    database::profile::DatabaseBackend,
 };
 
 use super::ConnectionEditor;
