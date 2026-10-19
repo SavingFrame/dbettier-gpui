@@ -1,4 +1,4 @@
-use gpui::{App, AppContext, Context, Entity, Global};
+use gpui::{App, AppContext, Context, Entity, Global, Task};
 
 use crate::database::{connection::ConnectionParameters, profile::DatabaseBackend, profile_store};
 
@@ -12,10 +12,17 @@ struct GlobalDatabaseProfileStore(Entity<DatabaseProfileStore>);
 
 impl Global for GlobalDatabaseProfileStore {}
 
+pub(crate) enum WriteStatus {
+    Idle,
+    Running(Task<()>),
+    Failed(String),
+}
+
 pub(crate) struct DatabaseProfileStore {
     profiles: Vec<DatabaseConnectionProfile>,
     load_error: Option<String>,
     storage: Option<FileDatabaseStorage>,
+    status: WriteStatus,
 }
 
 impl DatabaseProfileStore {
@@ -58,6 +65,7 @@ impl DatabaseProfileStore {
             profiles: Vec::new(),
             storage: None,
             load_error,
+            status: WriteStatus::Idle,
         }
     }
 
@@ -86,9 +94,10 @@ impl DatabaseProfileStore {
         name: String,
         connection_parameters: ConnectionParameters,
         cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<(), String>>, String> {
-        let profile_uuid = profile_uuid.to_string();
-
+    ) -> Result<(), String> {
+        if matches!(self.status, WriteStatus::Running(_)) {
+            return Err("Status shouldn't be running".to_string());
+        }
         let storage = self
             .storage
             .clone()
@@ -108,15 +117,22 @@ impl DatabaseProfileStore {
                     (save_result, profiles)
                 })
                 .await;
-            save_result.map_err(|error| error.to_string())?;
-            profile_store
-                .update(cx, |profile_store, cx| {
-                    profile_store.profiles = profiles;
-                    cx.notify();
-                })
-                .map_err(|error| error.to_string())
+            if let Err(error) = profile_store.update(cx, |profile_store, cx| {
+                profile_store.status = match save_result {
+                    Ok(()) => {
+                        profile_store.profiles = profiles;
+                        WriteStatus::Idle
+                    }
+                    Err(error) => WriteStatus::Failed(error.to_string()),
+                };
+                cx.notify();
+            }) {
+                eprintln!("Failed to update profile store: {error}")
+            }
         });
-        Ok(task)
+        self.status = WriteStatus::Running(task);
+        cx.notify();
+        Ok(())
     }
 
     pub(crate) fn create(
@@ -125,7 +141,10 @@ impl DatabaseProfileStore {
         connection_parameters: ConnectionParameters,
         backend: DatabaseBackend,
         cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<(), String>>, String> {
+    ) -> Result<(), String> {
+        if matches!(self.status, WriteStatus::Running(_)) {
+            return Err("Status shouldn't be running".to_string());
+        }
         let storage = self
             .storage
             .clone()
@@ -146,18 +165,73 @@ impl DatabaseProfileStore {
                     (save_result, profiles)
                 })
                 .await;
-            save_result.map_err(|error| error.to_string())?;
-            profile_store
-                .update(cx, |profile_store, cx| {
-                    profile_store.profiles = profiles;
-                    cx.notify();
-                })
-                .map_err(|error| error.to_string())
+            if let Err(error) = profile_store.update(cx, |profile_store, cx| {
+                profile_store.status = match save_result {
+                    Ok(()) => {
+                        profile_store.profiles = profiles;
+                        WriteStatus::Idle
+                    }
+                    Err(error) => WriteStatus::Failed(error.to_string()),
+                };
+                cx.notify();
+            }) {
+                eprintln!("Failed to update profile store: {error}")
+            }
         });
-        Ok(task)
+        self.status = WriteStatus::Running(task);
+        cx.notify();
+        Ok(())
+    }
+
+    pub(crate) fn remove(
+        &mut self,
+        profile_uuid: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if matches!(self.status, WriteStatus::Running(_)) {
+            return Err("Status shouldn't be running".to_string());
+        }
+        let storage = self
+            .storage
+            .clone()
+            .ok_or_else(|| "Storage does not exists in the profile store".to_string())?;
+
+        let mut profiles = self.profiles.clone();
+        let profile_index = profiles
+            .iter()
+            .position(|profile| profile.uuid == profile_uuid)
+            .ok_or_else(|| format!("profile with {profile_uuid} not found"))?;
+        profiles.remove(profile_index);
+        let task = cx.spawn(async move |profile_store, cx| {
+            let (save_result, profiles) = cx
+                .background_spawn(async move {
+                    let save_result = storage.save(&profiles);
+                    (save_result, profiles)
+                })
+                .await;
+            if let Err(error) = profile_store.update(cx, |profile_store, cx| {
+                profile_store.status = match save_result {
+                    Ok(()) => {
+                        profile_store.profiles = profiles;
+                        WriteStatus::Idle
+                    }
+                    Err(error) => WriteStatus::Failed(error.to_string()),
+                };
+                cx.notify();
+            }) {
+                eprintln!("Failed to update profile store: {error}")
+            }
+        });
+        self.status = WriteStatus::Running(task);
+        cx.notify();
+        Ok(())
     }
 
     pub(crate) fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
+    }
+
+    pub(crate) fn status(&self) -> &WriteStatus {
+        &self.status
     }
 }

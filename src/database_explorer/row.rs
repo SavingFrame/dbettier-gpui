@@ -207,15 +207,17 @@ impl<'a> DatabaseTreeRow<'a> {
                                 });
                             }
                             let edit_view = context_view.clone();
-                            return menu.item(PopupMenuItem::new("Edit connection...").on_click(
-                                move |_, _, cx| {
-                                    if let Some(view) = edit_view.upgrade() {
-                                        view.update(cx, |view, cx| {
-                                            view.edit_connection(Some(profile.clone()), cx)
-                                        });
-                                    }
-                                },
-                            ));
+                            return menu
+                                .item(PopupMenuItem::new("Edit connection...").on_click(
+                                    move |_, _, cx| {
+                                        if let Some(view) = edit_view.upgrade() {
+                                            view.update(cx, |view, cx| {
+                                                view.edit_connection(Some(profile.clone()), cx)
+                                            });
+                                        }
+                                    },
+                                ))
+                                .item(PopupMenuItem::new("Remove connection"));
                         }
                         let Some(target) = sql_target.clone() else {
                             return menu;

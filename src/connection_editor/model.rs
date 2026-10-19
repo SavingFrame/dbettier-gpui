@@ -24,8 +24,7 @@ pub(super) enum TestConnectionStatus {
 
 pub(super) enum SaveConnectionStatus {
     Idle,
-    Running(Option<Task<()>>),
-    Finished,
+    Running,
     Failed(String),
 }
 

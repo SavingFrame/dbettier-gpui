@@ -8,7 +8,7 @@ use gpui_kit::component::{
 
 use crate::{
     connection_editor::model::{SaveConnectionStatus, TestConnectionStatus},
-    database::profile::DatabaseBackend,
+    database::{profile::DatabaseBackend, profile_store::WriteStatus},
 };
 
 use super::ConnectionEditor;
@@ -70,8 +70,8 @@ impl ConnectionEditor {
                                 view.save_profile(cx);
                             }))
                             .loading(matches!(
-                                self.save_connection_status,
-                                SaveConnectionStatus::Running(_)
+                                self.save_profile_status,
+                                SaveConnectionStatus::Running
                             ))
                             .disabled(busy),
                     ),
@@ -112,10 +112,8 @@ impl ConnectionEditor {
                 theme.muted_foreground,
             ),
             TestConnectionStatus::Running(_) => ("Testing connection...", theme.muted_foreground),
-            // ConnectionEditorStatus::Saving => ("Saving connection...", theme.muted_foreground),
             TestConnectionStatus::Finished(message) => (message.as_str(), theme.success),
             TestConnectionStatus::Failed(message) => (message.as_str(), theme.danger),
-            // ConnectionEditorStatus::Notice(message) => (message.as_str(), theme.muted_foreground),
         };
         div()
             .flex()
@@ -253,6 +251,18 @@ impl ConnectionEditor {
                     .text_color(color)
                     .child(SharedString::from(message.to_owned())),
             )
+            .children(match &self.save_profile_status {
+                SaveConnectionStatus::Failed(error) => Some(
+                    div()
+                        .rounded_md()
+                        .bg(theme.muted)
+                        .p_3()
+                        .text_sm()
+                        .text_color(theme.danger)
+                        .child(format!("Failed to save connection: {error}")),
+                ),
+                _ => None,
+            })
             .into_any_element()
     }
 }

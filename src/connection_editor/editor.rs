@@ -1,4 +1,4 @@
-use gpui::{App, AppContext as _, Context, Entity, FocusHandle, Window};
+use gpui::{App, AppContext as _, Context, Entity, FocusHandle, Subscription, Window};
 use gpui_kit::component::{IndexPath, input::InputState, select::SelectState};
 
 use super::ConnectionDraft;
@@ -9,7 +9,7 @@ use crate::{
         DatabaseConnectionProfile,
         connection::{ConnectionDetails, ConnectionParameters, DatabaseConnection},
         profile::DatabaseBackend,
-        profile_store::DatabaseProfileStore,
+        profile_store::{DatabaseProfileStore, WriteStatus},
     },
     runtime,
 };
@@ -27,8 +27,9 @@ pub(crate) struct ConnectionEditor {
     pub(super) uri: Entity<InputState>,
     pub(super) ssl_mode: Entity<SelectState<Vec<&'static str>>>,
     pub(super) test_connection_status: TestConnectionStatus,
-    pub(super) save_connection_status: SaveConnectionStatus,
-    profile_store: Entity<DatabaseProfileStore>,
+    _profile_store_observation: Subscription,
+    pub(super) profile_store: Entity<DatabaseProfileStore>,
+    pub(super) save_profile_status: SaveConnectionStatus,
 }
 
 impl ConnectionEditor {
@@ -113,6 +114,22 @@ impl ConnectionEditor {
                 cx,
             )
         });
+        let profile_store = DatabaseProfileStore::global(cx);
+
+        let profile_store_subscription =
+            cx.observe_in(&profile_store, window, |editor, store, window, cx| {
+                if matches!(editor.save_profile_status, SaveConnectionStatus::Running) {
+                    match store.read(cx).status() {
+                        WriteStatus::Idle => window.remove_window(),
+                        WriteStatus::Failed(error) => {
+                            editor.save_profile_status =
+                                SaveConnectionStatus::Failed(error.to_string())
+                        }
+                        _ => (),
+                    }
+                }
+                cx.notify();
+            });
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -129,7 +146,8 @@ impl ConnectionEditor {
             ssl_mode,
             test_connection_status: TestConnectionStatus::Idle,
             profile_store: DatabaseProfileStore::global(cx),
-            save_connection_status: SaveConnectionStatus::Idle,
+            _profile_store_observation: profile_store_subscription,
+            save_profile_status: SaveConnectionStatus::Idle,
         }
     }
 
@@ -187,6 +205,9 @@ impl ConnectionEditor {
     }
 
     pub(super) fn save_profile(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.save_profile_status, SaveConnectionStatus::Running) {
+            return;
+        }
         let draft = self.draft(cx);
         let ConnectionDetails::Parameters(parameters) = draft.details else {
             eprint!("We do not support URI parameters yet");
@@ -202,24 +223,10 @@ impl ConnectionEditor {
                     profile_store.create(draft.name, parameters, DatabaseBackend::PostgreSql, cx)
                 }
             });
-        self.save_connection_status = match result {
-            Ok(task) => SaveConnectionStatus::Running(Some(cx.spawn(async move |editor, cx| {
-                let result = task.await;
-                if let Err(error) = editor.update_in(cx, |editor, window, cx| {
-                    editor.save_connection_status = match result {
-                        Ok(()) => {
-                            window.remove_window();
-                            SaveConnectionStatus::Finished
-                        }
-                        Err(error) => SaveConnectionStatus::Failed(error),
-                    };
-                    cx.notify();
-                }) {
-                    eprintln!("Failed to update save status: {error}");
-                }
-            }))),
-            Err(error) => SaveConnectionStatus::Failed(error),
-        };
+        match result {
+            Ok(()) => self.save_profile_status = SaveConnectionStatus::Running,
+            Err(error) => self.save_profile_status = SaveConnectionStatus::Failed(error),
+        }
         cx.notify();
     }
 }

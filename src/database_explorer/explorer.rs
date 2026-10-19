@@ -4,7 +4,7 @@ use std::{
 };
 
 use gpui::{
-    Context, Entity, EventEmitter, SharedString, Subscription, Window, div, prelude::*, px,
+    Context, Entity, EventEmitter, SharedString, Subscription, Task, Window, div, prelude::*, px,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -208,6 +208,11 @@ impl DatabaseExplorer {
         });
         cx.notify();
     }
+    fn remove_connection(&self, profile_uuid: &str, cx: &mut Context<Self>) {
+        self.profile_store.update(cx, |profile_store, cx| {
+            profile_store.remove(profile_uuid, cx)
+        });
+    }
 }
 
 impl gpui::Focusable for DatabaseExplorer {
@@ -309,6 +314,13 @@ fn render_header(theme: &Theme, cx: &Context<DatabaseExplorer>) -> impl IntoElem
                         .icon(IconName::Plus)
                         .tooltip("Add database connection")
                         .on_click(cx.listener(|tree, _, _, cx| tree.edit_connection(None, cx))),
+                )
+                .child(
+                    Button::new("remove-database-profile")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Minus)
+                        .tooltip("Remove database connection"),
                 )
                 .child(
                     Button::new("refresh-database-catalog")
